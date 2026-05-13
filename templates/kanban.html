@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Kanban — Gerenciamento MIND{% endblock %}
+{% block content %}
+<!-- Toolbar -->
+<div class="kanban-toolbar" id="kanban-toolbar">
+    <div class="toolbar-left">
+        <h1 class="page-title">Board de Projetos</h1>
+    </div>
+    <div class="toolbar-right">
+        <input type="text" class="input-search" id="kanban-search" placeholder="Buscar por OS, cliente...">
+        <select class="input-select" id="kanban-filter-sla">
+            <option value="">Todos os SLAs</option>
+            <option value="dentro">Dentro do SLA</option>
+            <option value="fora">Fora do SLA</option>
+        </select>
+        <button class="btn btn-primary" id="btn-novo-projeto" style="display:none;">+ Novo Projeto</button>
+        <button class="btn btn-ghost" id="btn-nova-fase" style="display:none;">+ Nova Fase</button>
+        <a href="/admin" class="btn btn-ghost" id="btn-admin" style="display:none;">Admin</a>
+    </div>
+</div>
+
+<!-- Kanban Board -->
+<div class="kanban-board" id="kanban-board">
+    <!-- Colunas serão geradas pelo JS -->
+</div>
+
+<!-- Modal: Novo/Editar Projeto -->
+<div class="modal-overlay" id="modal-projeto" style="display:none;">
+    <div class="modal-card modal-lg">
+        <div class="modal-header">
+            <h2 id="modal-projeto-titulo">Novo Projeto</h2>
+            <button class="modal-close" onclick="fecharModal('modal-projeto')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="form-projeto">
+                <input type="hidden" id="proj-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="proj-os">OS (Ordem de Serviço) *</label>
+                        <input type="text" id="proj-os" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="proj-cliente">Cliente</label>
+                        <input type="text" id="proj-cliente">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="proj-solicitante">Solicitante</label>
+                        <input type="text" id="proj-solicitante">
+                    </div>
+                    <div class="form-group">
+                        <label for="proj-atividade">Atividade</label>
+                        <input type="text" id="proj-atividade">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="proj-data-limite">Data Limite *</label>
+                        <input type="date" id="proj-data-limite" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="proj-responsavel">Responsável</label>
+                        <select id="proj-responsavel"><option value="">Selecionar...</option></select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="proj-fase">Fase Inicial</label>
+                        <select id="proj-fase"><option value="">Sem fase</option></select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="proj-descricao">Descrição</label>
+                    <textarea id="proj-descricao" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="proj-comentario">Comentário</label>
+                    <textarea id="proj-comentario" rows="2"></textarea>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-projeto')">Cancelar</button>
+            <button class="btn btn-primary" id="btn-salvar-projeto">Salvar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Detalhe do Projeto -->
+<div class="modal-overlay" id="modal-detalhe" style="display:none;">
+    <div class="modal-card modal-lg">
+        <div class="modal-header">
+            <h2 id="detalhe-titulo">Projeto</h2>
+            <button class="modal-close" onclick="fecharModal('modal-detalhe')">&times;</button>
+        </div>
+        <div class="modal-body" id="detalhe-body">
+            <!-- Preenchido pelo JS -->
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-detalhe')">Fechar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Nova Fase -->
+<div class="modal-overlay" id="modal-fase" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h2>Nova Fase</h2>
+            <button class="modal-close" onclick="fecharModal('modal-fase')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="form-fase">
+                <div class="form-group">
+                    <label for="fase-nome">Nome da Fase *</label>
+                    <input type="text" id="fase-nome" required>
+                </div>
+                <div class="form-group">
+                    <label for="fase-cor">Cor</label>
+                    <input type="color" id="fase-cor" value="#6366f1">
+                </div>
+                <div class="form-group">
+                    <label for="fase-descricao">Descrição</label>
+                    <input type="text" id="fase-descricao">
+                </div>
+                <div class="form-group">
+                    <label>Funções exigidas</label>
+                    <div id="fase-funcoes-list" class="checkbox-list"></div>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-fase')">Cancelar</button>
+            <button class="btn btn-primary" id="btn-salvar-fase">Salvar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Atribuir Funcionário -->
+<div class="modal-overlay" id="modal-atribuir" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h2>Atribuir Funcionário</h2>
+            <button class="modal-close" onclick="fecharModal('modal-atribuir')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="atribuir-pf-id">
+            <div class="form-group">
+                <label>Funcionários elegíveis para esta fase:</label>
+                <select id="atribuir-funcionario" class="input-select">
+                    <option value="">Selecionar...</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-atribuir')">Cancelar</button>
+            <button class="btn btn-primary" id="btn-confirmar-atribuir">Atribuir</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/kanban.js"></script>
+{% endblock %}

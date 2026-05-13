@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Gerenciamento MIND — Sistema de Gestão de Projetos e Etapas">
+    <title>{% block title %}Gerenciamento MIND{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% block body %}
+    <nav class="navbar" id="main-navbar">
+        <div class="navbar-brand">
+            <div class="brand-icon">M</div>
+            <span class="brand-text">MIND</span>
+        </div>
+        <div class="navbar-menu" id="navbar-menu"></div>
+        <div class="navbar-user" id="navbar-user">
+            <span class="user-name" id="user-name"></span>
+            <span class="user-badge" id="user-badge"></span>
+            <a href="/logout" class="btn btn-ghost btn-sm" id="btn-logout">Sair</a>
+        </div>
+    </nav>
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+    {% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>

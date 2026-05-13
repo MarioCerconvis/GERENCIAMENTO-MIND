@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Admin — Gerenciamento MIND{% endblock %}
+{% block content %}
+<div class="admin-layout">
+    <aside class="admin-sidebar" id="admin-sidebar">
+        <nav class="sidebar-nav">
+            <button class="sidebar-link active" data-tab="funcionarios" id="tab-funcionarios">Funcionários</button>
+            <button class="sidebar-link" data-tab="funcoes" id="tab-funcoes">Funções</button>
+            <button class="sidebar-link" data-tab="fases" id="tab-fases">Fases</button>
+            <button class="sidebar-link" data-tab="usuarios" id="tab-usuarios">Usuários</button>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="/kanban" class="btn btn-ghost btn-sm btn-full">← Voltar ao Kanban</a>
+        </div>
+    </aside>
+
+    <section class="admin-content" id="admin-content">
+        <!-- Tab: Funcionários -->
+        <div class="admin-tab active" id="panel-funcionarios">
+            <div class="tab-header">
+                <h2>Funcionários</h2>
+                <button class="btn btn-primary" id="btn-novo-funcionario">+ Novo</button>
+            </div>
+            <table class="data-table" id="table-funcionarios">
+                <thead>
+                    <tr><th>Nome</th><th>E-mail</th><th>Funções</th><th>Ações</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Tab: Funções -->
+        <div class="admin-tab" id="panel-funcoes" style="display:none;">
+            <div class="tab-header">
+                <h2>Funções</h2>
+                <button class="btn btn-primary" id="btn-nova-funcao">+ Nova</button>
+            </div>
+            <table class="data-table" id="table-funcoes">
+                <thead>
+                    <tr><th>Nome</th><th>Ações</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Tab: Fases -->
+        <div class="admin-tab" id="panel-fases" style="display:none;">
+            <div class="tab-header">
+                <h2>Fases</h2>
+                <button class="btn btn-primary" id="btn-nova-fase-admin">+ Nova</button>
+            </div>
+            <table class="data-table" id="table-fases">
+                <thead>
+                    <tr><th>Ordem</th><th>Nome</th><th>Cor</th><th>Funções Exigidas</th><th>Ações</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Tab: Usuários -->
+        <div class="admin-tab" id="panel-usuarios" style="display:none;">
+            <div class="tab-header">
+                <h2>Usuários</h2>
+                <button class="btn btn-primary" id="btn-novo-usuario">+ Novo</button>
+            </div>
+            <table class="data-table" id="table-usuarios">
+                <thead>
+                    <tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Ativo</th><th>Ações</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<!-- Modal genérico Admin -->
+<div class="modal-overlay" id="modal-admin" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h2 id="modal-admin-titulo">Novo</h2>
+            <button class="modal-close" onclick="fecharModal('modal-admin')">&times;</button>
+        </div>
+        <div class="modal-body" id="modal-admin-body"></div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-admin')">Cancelar</button>
+            <button class="btn btn-primary" id="btn-salvar-admin">Salvar</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/admin.js"></script>
+{% endblock %}
