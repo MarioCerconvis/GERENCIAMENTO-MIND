@@ -660,6 +660,7 @@ def api_deletar_comentario(cid):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def seed_admin():
+    """Cria o admin padrão se nenhum admin existir."""
     if Usuario.query.filter_by(perfil="admin").count() == 0:
         admin = Usuario(
             nome="Administrador",
@@ -673,7 +674,14 @@ def seed_admin():
         print("[SEED] Usuário admin criado: admin@mind.com.br / admin123")
 
 
+def seed_dados_reais():
+    """Popula funções, funcionários, fases e usuários da Mind."""
+    from seed_data import seed
+    seed(bcrypt)
+
+
 with app.app_context():
+    seed_dados_reais()
     seed_admin()
 
 
