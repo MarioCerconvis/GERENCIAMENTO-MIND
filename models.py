@@ -176,6 +176,16 @@ class Projeto(db.Model):
         return (datetime.utcnow() - fase_ativa.data_entrada).days
 
     def to_dict(self, include_historico=False):
+        fase_ativa = ProjetoFase.query.filter_by(projeto_id=self.projeto_id, data_saida=None).first()
+        sla_fase = None
+        if fase_ativa and fase_ativa.data_limite:
+            dias_restantes_fase = fase_ativa.dias_restantes_sla()
+            sla_fase = {
+                "flag": "Dentro do SLA" if dias_restantes_fase >= 0 else "Fora do SLA",
+                "dias_restantes": dias_restantes_fase,
+                "data_limite": fase_ativa.data_limite.isoformat()
+            }
+
         d = {
             "id": self.projeto_id,
             "os": self.os,
@@ -196,6 +206,7 @@ class Projeto(db.Model):
                 "dias_restantes": self.dias_restantes_sla(),
                 "dias_na_fase": self.dias_na_fase_atual(),
             },
+            "sla_fase": sla_fase,
         }
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]
@@ -214,6 +225,7 @@ class ProjetoFase(db.Model):
     id_fase = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=False)
     data_entrada = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     data_saida = db.Column(db.DateTime, nullable=True)  # NULL = fase ativa
+    data_limite = db.Column(db.Date, nullable=True)
     responsavel_fase_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
 
     # Relacionamentos
@@ -226,7 +238,13 @@ class ProjetoFase(db.Model):
         fim = self.data_saida or datetime.utcnow()
         return (fim - self.data_entrada).days
 
+    def dias_restantes_sla(self):
+        if not self.data_limite:
+            return None
+        return (self.data_limite - date.today()).days
+
     def to_dict(self):
+        dias_restantes = self.dias_restantes_sla()
         return {
             "id": self.id,
             "fase_id": self.id_fase,
@@ -234,6 +252,9 @@ class ProjetoFase(db.Model):
             "fase_cor": self.fase.cor if self.fase else "#94a3b8",
             "data_entrada": self.data_entrada.isoformat() if self.data_entrada else "",
             "data_saida": self.data_saida.isoformat() if self.data_saida else None,
+            "data_limite": self.data_limite.isoformat() if self.data_limite else None,
+            "dias_restantes": dias_restantes,
+            "sla_fase_flag": "Sem prazo" if dias_restantes is None else ("Dentro do SLA" if dias_restantes >= 0 else "Fora do SLA"),
             "dias_na_fase": self.dias_na_fase(),
             "responsavel_fase_id": self.responsavel_fase_id,
             "responsavel_fase_nome": self.responsavel_fase.nome if self.responsavel_fase else "",

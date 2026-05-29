@@ -109,7 +109,14 @@ function createCard(projeto) {
     const slaDias = sla.dias_restantes != null
         ? (sla.dias_restantes >= 0 ? `${sla.dias_restantes}d restantes` : `${Math.abs(sla.dias_restantes)}d atraso`)
         : "";
-    const diasFase = sla.dias_na_fase != null ? `⏱️ ${sla.dias_na_fase}d na fase` : "";
+    
+    let diasFase = sla.dias_na_fase != null ? `⏱️ ${sla.dias_na_fase}d na fase` : "";
+    if (projeto.sla_fase) {
+        const sf = projeto.sla_fase;
+        const sfIcon = sf.flag === "Dentro do SLA" ? "🟢" : "🔴";
+        const sfDias = sf.dias_restantes >= 0 ? `${sf.dias_restantes}d rest.` : `${Math.abs(sf.dias_restantes)}d atraso`;
+        diasFase += ` | ${sfIcon} ${sfDias} (Fase)`;
+    }
 
     card.innerHTML = `
         <div class="card-os">${projeto.os}</div>
@@ -160,27 +167,51 @@ function handleDragLeave(e) {
     e.currentTarget.classList.remove("drag-over");
 }
 
+let pendingMove = null;
+
 async function handleDrop(e) {
     e.preventDefault();
     e.currentTarget.classList.remove("drag-over");
     const faseId = e.currentTarget.dataset.faseId;
     if (!draggedProjectId || faseId === "sem_fase") return;
 
-    const res = await fetch(`/api/projetos/${draggedProjectId}/mover-fase`, {
+    pendingMove = { projetoId: draggedProjectId, faseId: parseInt(faseId), isInline: false };
+    document.getElementById("mover-data-limite").value = "";
+    abrirModal("modal-mover-fase");
+    draggedProjectId = null;
+}
+
+function cancelarMoverFase() {
+    pendingMove = null;
+    fecharModal("modal-mover-fase");
+}
+
+document.getElementById("btn-confirmar-mover")?.addEventListener("click", async () => {
+    if (!pendingMove) return;
+    const dataLimite = document.getElementById("mover-data-limite").value;
+    
+    const payload = { fase_id: pendingMove.faseId };
+    if (dataLimite) {
+        payload.data_limite_fase = dataLimite;
+    }
+    
+    const res = await fetch(`/api/projetos/${pendingMove.projetoId}/mover-fase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fase_id: parseInt(faseId) }),
+        body: JSON.stringify(payload),
     });
 
     if (res.ok) {
         showToast("Projeto movido com sucesso!", "success");
+        fecharModal("modal-mover-fase");
+        if (pendingMove.isInline) fecharModal("modal-detalhe");
         await loadBoard();
     } else {
         const err = await res.json();
         showToast(err.erro || "Erro ao mover projeto", "error");
     }
-    draggedProjectId = null;
-}
+    pendingMove = null;
+});
 
 // ─── Toolbar ─────────────────────────────────────────────────────────────────
 
@@ -249,6 +280,7 @@ async function openNewProject() {
     document.getElementById("proj-data-limite").value = "";
     document.getElementById("proj-descricao").value = "";
     document.getElementById("proj-comentario").value = "";
+    if(document.getElementById("proj-fase-data-limite")) document.getElementById("proj-fase-data-limite").value = "";
 
     // Populate selects
     const respSelect = document.getElementById("proj-responsavel");
@@ -278,6 +310,7 @@ async function saveProject() {
         comentario: document.getElementById("proj-comentario").value,
         responsavel_id: document.getElementById("proj-responsavel").value || null,
         fase_id: document.getElementById("proj-fase").value || null,
+        fase_data_limite: document.getElementById("proj-fase-data-limite") ? document.getElementById("proj-fase-data-limite").value : null,
     };
 
     if (data.responsavel_id) data.responsavel_id = parseInt(data.responsavel_id);
@@ -482,20 +515,9 @@ async function moverFaseInline(projetoId) {
     const faseId = select.value;
     if (!faseId) { showToast("Selecione uma fase", "error"); return; }
 
-    const res = await fetch(`/api/projetos/${projetoId}/mover-fase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fase_id: parseInt(faseId) }),
-    });
-
-    if (res.ok) {
-        showToast("Projeto movido para nova fase!", "success");
-        fecharModal("modal-detalhe");
-        await loadBoard();
-    } else {
-        const err = await res.json();
-        showToast(err.erro || "Erro ao mover", "error");
-    }
+    pendingMove = { projetoId: projetoId, faseId: parseInt(faseId), isInline: true };
+    document.getElementById("mover-data-limite").value = "";
+    abrirModal("modal-mover-fase");
 }
 
 // ─── Comentários ─────────────────────────────────────────────────────────────

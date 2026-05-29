@@ -360,6 +360,14 @@ def api_editar_fase(fid):
 @requer_perfil_api("admin", "gestor")
 def api_deletar_fase(fid):
     f = Fase.query.get_or_404(fid)
+    
+    # Verificar se a fase possui histórico ou está sendo usada
+    em_uso_agora = Projeto.query.filter_by(fase_atual_id=fid).first()
+    em_historico = ProjetoFase.query.filter_by(id_fase=fid).first()
+    
+    if em_uso_agora or em_historico:
+        return jsonify({"erro": "Não é possível excluir esta fase pois existem cards associados a ela (atualmente ou no histórico)."}), 400
+        
     db.session.delete(f)
     db.session.commit()
     return jsonify({"ok": True})
@@ -437,10 +445,15 @@ def api_criar_projeto():
             novo.fase_atual_id = fase_id
             db.session.add(novo)
             db.session.flush()  # Para obter o ID
+            
+            data_limite_fase_str = body.get("fase_data_limite")
+            data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
+            
             pf = ProjetoFase(
                 projeto_id=novo.projeto_id,
                 id_fase=fase_id,
                 responsavel_fase_id=body.get("responsavel_id"),
+                data_limite=data_limite_fase
             )
             db.session.add(pf)
     else:
@@ -493,11 +506,16 @@ def api_mover_fase(pid):
     fase_ativa = ProjetoFase.query.filter_by(projeto_id=pid, data_saida=None).first()
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
+        
+    data_limite_fase_str = body.get("data_limite_fase")
+    data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
+    
     # Abrir nova fase
     pf = ProjetoFase(
         projeto_id=pid,
         id_fase=nova_fase_id,
         responsavel_fase_id=body.get("responsavel_fase_id", p.responsavel_id),
+        data_limite=data_limite_fase
     )
     db.session.add(pf)
     p.fase_atual_id = nova_fase_id

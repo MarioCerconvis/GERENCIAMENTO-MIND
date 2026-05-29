@@ -69,6 +69,10 @@
                         <label for="proj-fase">Fase Inicial</label>
                         <select id="proj-fase"><option value="">Sem fase</option></select>
                     </div>
+                    <div class="form-group">
+                        <label for="proj-fase-data-limite">Prazo Fase Inicial</label>
+                        <input type="date" id="proj-fase-data-limite">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="proj-descricao">Descrição</label>
@@ -156,6 +160,27 @@
         <div class="modal-footer">
             <button class="btn btn-ghost" onclick="fecharModal('modal-atribuir')">Cancelar</button>
             <button class="btn btn-primary" id="btn-confirmar-atribuir">Atribuir</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Mover Fase -->
+<div class="modal-overlay" id="modal-mover-fase" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h2>Prazo da Fase (Opcional)</h2>
+            <button class="modal-close" onclick="cancelarMoverFase()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Defina um prazo opcional para o card nesta nova fase.</p>
+            <div class="form-group">
+                <label for="mover-data-limite">Data Limite</label>
+                <input type="date" id="mover-data-limite">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="cancelarMoverFase()">Cancelar</button>
+            <button class="btn btn-primary" id="btn-confirmar-mover">Confirmar</button>
         </div>
     </div>
 </div>

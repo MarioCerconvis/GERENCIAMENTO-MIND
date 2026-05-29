@@ -71,6 +71,18 @@ def notificar_sla_estourado(projeto, responsavel, dias_atraso):
     enviar_email([responsavel.email], f"[MIND] SLA ultrapassado - {projeto.os} - {dias_atraso} dia(s)", corpo)
 
 
+def notificar_sla_fase_estourado(projeto, responsavel, dias_atraso, fase_nome):
+    if not responsavel or not responsavel.email:
+        return
+    corpo = _email_wrap("SLA da Fase Ultrapassado", "#ef4444", [
+        ("Projeto (OS):", f"<strong>{projeto.os}</strong>"),
+        ("Cliente:", projeto.cliente or ""),
+        ("Fase Atrasada:", fase_nome),
+        ("Dias de atraso:", f'<strong style="color:#ef4444;">{dias_atraso} dia(s)</strong>'),
+    ])
+    enviar_email([responsavel.email], f"[MIND] SLA Fase ultrapassado - {projeto.os} - {dias_atraso} dia(s)", corpo)
+
+
 def notificar_mudanca_fase(projeto, fase_nova, equipe_nova):
     destinatarios = [f.email for f in equipe_nova if f.email]
     if not destinatarios:
