@@ -116,6 +116,17 @@ function createCard(projeto) {
         const sfIcon = sf.flag === "Dentro do SLA" ? "🟢" : "🔴";
         const sfDias = sf.dias_restantes >= 0 ? `${sf.dias_restantes}d rest.` : `${Math.abs(sf.dias_restantes)}d atraso`;
         diasFase += ` | ${sfIcon} ${sfDias} (Fase)`;
+        
+        // SLA de Fase Visual
+        if (sf.dias_restantes > 2) {
+            card.style.backgroundColor = "rgba(144, 238, 144, 0.5)"; // verde claro transparente
+        } else if (sf.dias_restantes === 2) {
+            card.style.backgroundColor = "rgba(255, 255, 0, 0.5)"; // amarelo transparente
+        } else if (sf.dias_restantes === 1 || sf.dias_restantes === 0) {
+            card.style.backgroundColor = "rgba(255, 165, 0, 0.5)"; // laranja transparente
+        } else if (sf.dias_restantes < 0) {
+            card.style.backgroundColor = "rgba(255, 0, 0, 0.3)"; // vermelho transparente
+        }
     }
 
     card.innerHTML = `
