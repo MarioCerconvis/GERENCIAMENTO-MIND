@@ -115,6 +115,7 @@ class Fase(db.Model):
     descricao = db.Column(db.String(255), nullable=True)
     cor = db.Column(db.String(7), default="#6366f1")  # Hex color para o Kanban
     ordem = db.Column(db.Integer, default=0)  # Posição sugerida
+    ativa = db.Column(db.Boolean, default=True)  # Soft delete: False = oculta do Kanban
 
     # N:N com funcoes (funções exigidas por esta fase)
     funcoes_exigidas = db.relationship("Funcao", secondary=fase_funcao, backref="fases", lazy="subquery")
@@ -126,6 +127,7 @@ class Fase(db.Model):
             "descricao": self.descricao or "",
             "cor": self.cor,
             "ordem": self.ordem,
+            "ativa": self.ativa if self.ativa is not None else True,
         }
         if include_funcoes:
             d["funcoes_exigidas"] = [f.to_dict() for f in self.funcoes_exigidas]

@@ -308,7 +308,11 @@ def api_deletar_funcao(fid):
 @app.route("/api/fases", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_listar_fases():
-    fases = Fase.query.order_by(Fase.ordem).all()
+    include_inativas = request.args.get("todas") == "1"
+    if include_inativas:
+        fases = Fase.query.order_by(Fase.ordem).all()
+    else:
+        fases = Fase.query.filter(db.or_(Fase.ativa == True, Fase.ativa == None)).order_by(Fase.ordem).all()
     return jsonify([f.to_dict() for f in fases])
 
 
@@ -352,6 +356,8 @@ def api_editar_fase(fid):
     if "funcao_ids" in body:
         funcoes = Funcao.query.filter(Funcao.id_funcao.in_(body["funcao_ids"])).all()
         f.funcoes_exigidas = funcoes
+    if "ativa" in body:
+        f.ativa = bool(body["ativa"])
     db.session.commit()
     return jsonify(f.to_dict())
 
@@ -361,16 +367,30 @@ def api_editar_fase(fid):
 def api_deletar_fase(fid):
     f = Fase.query.get_or_404(fid)
     
-    # Verificar se a fase possui histórico ou está sendo usada
+    # Verificar se a fase possui projetos atualmente nela
     em_uso_agora = Projeto.query.filter_by(fase_atual_id=fid).first()
+    
+    if em_uso_agora:
+        return jsonify({"erro": "Não é possível excluir esta fase pois existem cards atualmente nela. Mova os cards primeiro."}), 400
+    
+    # Verificar se há histórico
     em_historico = ProjetoFase.query.filter_by(id_fase=fid).first()
     
-    if em_uso_agora or em_historico:
-        return jsonify({"erro": "Não é possível excluir esta fase pois existem cards associados a ela (atualmente ou no histórico)."}), 400
-        
-    db.session.delete(f)
-    db.session.commit()
-    return jsonify({"ok": True})
+    if em_historico:
+        # Soft delete: desativar a fase
+        f.ativa = False
+        db.session.commit()
+        return jsonify({"ok": True, "modo": "desativada", "msg": "Fase desativada (possui histórico). Não aparecerá mais no Kanban."})
+    else:
+        # Hard delete: sem histórico, pode remover de verdade
+        try:
+            db.session.execute(fase_funcao.delete().where(fase_funcao.c.id_fase == fid))
+            db.session.delete(f)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"erro": f"Erro ao excluir fase: {str(e)}"}), 500
+        return jsonify({"ok": True, "modo": "excluida"})
 
 
 @app.route("/api/fases/reordenar", methods=["POST"])
@@ -502,6 +522,8 @@ def api_mover_fase(pid):
     if not nova_fase_id:
         return jsonify({"erro": "fase_id é obrigatório"}), 400
     nova_fase = Fase.query.get_or_404(nova_fase_id)
+    if nova_fase.ativa == False:
+        return jsonify({"erro": "Esta fase está desativada e não pode receber novos cards."}), 400
     # Fechar fase atual
     fase_ativa = ProjetoFase.query.filter_by(projeto_id=pid, data_saida=None).first()
     if fase_ativa:
@@ -584,7 +606,7 @@ def api_remover_funcionario_fase(pf_id):
 def api_kanban():
     """Retorna dados do board Kanban: fases como colunas + projetos."""
     u = get_usuario_logado()
-    fases = Fase.query.order_by(Fase.ordem).all()
+    fases = Fase.query.filter(db.or_(Fase.ativa == True, Fase.ativa == None)).order_by(Fase.ordem).all()
     projetos_query = Projeto.query
     if u.perfil == "funcionario" and u.funcionario:
         func_id = u.funcionario.id_func

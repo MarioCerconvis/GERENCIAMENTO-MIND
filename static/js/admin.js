@@ -202,22 +202,27 @@ async function deleteFuncao(id) {
 // ─── FASES ───────────────────────────────────────────────────────────────────
 
 async function loadFases() {
-    const res = await fetch("/api/fases");
+    const res = await fetch("/api/fases?todas=1");
     if (!res.ok) return;
     const data = await res.json();
     const tbody = document.querySelector("#table-fases tbody");
     tbody.innerHTML = "";
     data.forEach(f => {
         const funcoes = (f.funcoes_exigidas || []).map(fn => `<span class="tag">${fn.nome}</span>`).join("");
+        const isInativa = f.ativa === false;
         const tr = document.createElement("tr");
+        if (isInativa) tr.style.opacity = "0.45";
         tr.innerHTML = `
             <td>${f.ordem}</td>
-            <td>${f.nome}</td>
+            <td>${f.nome} ${isInativa ? '<span class="tag" style="background:#ef4444;color:white;margin-left:6px;">Desativada</span>' : ''}</td>
             <td><span style="display:inline-block;width:24px;height:24px;background:${f.cor};border-radius:4px;vertical-align:middle;"></span></td>
             <td>${funcoes || "—"}</td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="editFase(${f.id})">Editar</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteFase(${f.id})">Excluir</button>
+                ${isInativa
+                    ? `<button class="btn btn-primary btn-sm" onclick="reativarFase(${f.id})">Reativar</button>`
+                    : `<button class="btn btn-danger btn-sm" onclick="deleteFase(${f.id})">Excluir</button>`
+                }
             </td>
         `;
         tbody.appendChild(tr);
@@ -296,9 +301,34 @@ async function editFase(id) {
 
 async function deleteFase(id) {
     if (!confirm("Excluir esta fase?")) return;
-    await fetch(`/api/fases/${id}`, { method: "DELETE" });
-    showToast("Fase excluída!", "success");
-    loadFases();
+    const res = await fetch(`/api/fases/${id}`, { method: "DELETE" });
+    if (res.ok) {
+        const data = await res.json();
+        if (data.modo === "desativada") {
+            showToast(data.msg || "Fase desativada (possui histórico).", "success");
+        } else {
+            showToast("Fase excluída!", "success");
+        }
+        loadFases();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao excluir fase", "error");
+    }
+}
+
+async function reativarFase(id) {
+    const res = await fetch(`/api/fases/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ativa: true }),
+    });
+    if (res.ok) {
+        showToast("Fase reativada!", "success");
+        loadFases();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao reativar", "error");
+    }
 }
 
 // ─── USUÁRIOS ────────────────────────────────────────────────────────────────
