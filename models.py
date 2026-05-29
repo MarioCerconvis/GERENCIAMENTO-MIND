@@ -26,11 +26,11 @@ fase_funcao = db.Table(
     db.Column("id_funcao", db.Integer, db.ForeignKey("funcoes.id_funcao"), primary_key=True),
 )
 
-# ─── Tabela associativa: projeto_fase <-> funcionario (N:N) ──────────────────
+# ─── Tabela associativa: objeto_fase <-> funcionario (N:N) ──────────────────
 
-projeto_fase_funcionario = db.Table(
-    "projeto_fase_funcionario",
-    db.Column("id_projeto_fase", db.Integer, db.ForeignKey("projeto_fase.id"), primary_key=True),
+objeto_fase_funcionario = db.Table(
+    "objeto_fase_funcionario",
+    db.Column("id_objeto_fase", db.Integer, db.ForeignKey("objeto_fase.id"), primary_key=True),
     db.Column("id_funcionario", db.Integer, db.ForeignKey("funcionarios.id_func"), primary_key=True),
     db.Column("atribuido_em", db.DateTime, default=datetime.utcnow),
 )
@@ -140,20 +140,16 @@ class Projeto(db.Model):
     __tablename__ = "projetos"
     projeto_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     os = db.Column(db.String(50), unique=True, nullable=False)  # Ordem de Serviço
-    atividade = db.Column(db.String(200), nullable=True)
     cliente = db.Column(db.String(150), nullable=True)
     solicitante = db.Column(db.String(150), nullable=True)
     descricao = db.Column(db.Text, nullable=True)
     comentario = db.Column(db.Text, nullable=True)
     data_inclusao = db.Column(db.Date, default=date.today)
-    data_limite = db.Column(db.Date, nullable=False)
+    data_limite = db.Column(db.Date, nullable=False) # SLA macro do projeto
     responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
-    fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
 
     # Relacionamentos
-    fase_atual = db.relationship("Fase", foreign_keys=[fase_atual_id])
-    historico_fases = db.relationship("ProjetoFase", backref="projeto", lazy="dynamic",
-                                      order_by="ProjetoFase.data_entrada.desc()")
+    objetos = db.relationship("Objeto", backref="projeto", lazy="dynamic", cascade="all, delete-orphan")
 
     def dias_restantes_sla(self):
         """Retorna os dias restantes até o prazo. Negativo = atraso."""
@@ -168,17 +164,71 @@ class Projeto(db.Model):
             return "Sem prazo"
         return "Dentro do SLA" if dias >= 0 else "Fora do SLA"
 
+    def to_dict(self, include_historico=False):
+        d = {
+            "id": self.projeto_id,
+            "os": self.os,
+            "cliente": self.cliente or "",
+            "solicitante": self.solicitante or "",
+            "descricao": self.descricao or "",
+            "comentario": self.comentario or "",
+            "data_inclusao": self.data_inclusao.isoformat() if self.data_inclusao else "",
+            "data_limite": self.data_limite.isoformat() if self.data_limite else "",
+            "responsavel_id": self.responsavel_id,
+            "responsavel_nome": self.responsavel.nome if self.responsavel else "",
+            "sla": {
+                "flag": self.sla_flag(),
+                "dias_restantes": self.dias_restantes_sla(),
+            },
+            "objetos": [o.to_dict() for o in self.objetos.all()]
+        }
+        if include_historico:
+            d["comentarios"] = [c.to_dict() for c in Comentario.query.filter_by(
+                projeto_id=self.projeto_id
+            ).order_by(Comentario.criado_em.desc()).all()]
+        return d
+
+
+# ─── Objeto ───────────────────────────────────────────────────────────────────
+
+class Objeto(db.Model):
+    __tablename__ = "objetos"
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    projeto_id = db.Column(db.Integer, db.ForeignKey("projetos.projeto_id"), nullable=False)
+    nome = db.Column(db.String(200), nullable=False)
+    descricao = db.Column(db.Text, nullable=True)
+    data_limite = db.Column(db.Date, nullable=False) # SLA do objeto
+    responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
+    fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
+
+    # Relacionamentos
+    fase_atual = db.relationship("Fase", foreign_keys=[fase_atual_id])
+    historico_fases = db.relationship("ObjetoFase", backref="objeto", lazy="dynamic",
+                                      order_by="ObjetoFase.data_entrada.desc()", cascade="all, delete-orphan")
+    responsavel = db.relationship("Funcionario", foreign_keys=[responsavel_id])
+
+    def dias_restantes_sla(self):
+        """Retorna os dias restantes até o prazo do objeto. Negativo = atraso."""
+        if not self.data_limite:
+            return None
+        return (self.data_limite - date.today()).days
+
+    def sla_flag(self):
+        dias = self.dias_restantes_sla()
+        if dias is None:
+            return "Sem prazo"
+        return "Dentro do SLA" if dias >= 0 else "Fora do SLA"
+
     def dias_na_fase_atual(self):
-        """Retorna quantos dias o projeto está na fase atual."""
-        fase_ativa = ProjetoFase.query.filter_by(
-            projeto_id=self.projeto_id, data_saida=None
+        fase_ativa = ObjetoFase.query.filter_by(
+            objeto_id=self.id, data_saida=None
         ).first()
         if not fase_ativa:
             return 0
         return (datetime.utcnow() - fase_ativa.data_entrada).days
 
     def to_dict(self, include_historico=False):
-        fase_ativa = ProjetoFase.query.filter_by(projeto_id=self.projeto_id, data_saida=None).first()
+        fase_ativa = ObjetoFase.query.filter_by(objeto_id=self.id, data_saida=None).first()
         sla_fase = None
         if fase_ativa and fase_ativa.data_limite:
             dias_restantes_fase = fase_ativa.dias_restantes_sla()
@@ -189,14 +239,12 @@ class Projeto(db.Model):
             }
 
         d = {
-            "id": self.projeto_id,
-            "os": self.os,
-            "atividade": self.atividade or "",
-            "cliente": self.cliente or "",
-            "solicitante": self.solicitante or "",
+            "id": self.id,
+            "projeto_id": self.projeto_id,
+            "projeto_os": self.projeto.os if self.projeto else "",
+            "cliente": self.projeto.cliente if self.projeto else "",
+            "nome": self.nome,
             "descricao": self.descricao or "",
-            "comentario": self.comentario or "",
-            "data_inclusao": self.data_inclusao.isoformat() if self.data_inclusao else "",
             "data_limite": self.data_limite.isoformat() if self.data_limite else "",
             "responsavel_id": self.responsavel_id,
             "responsavel_nome": self.responsavel.nome if self.responsavel else "",
@@ -213,17 +261,18 @@ class Projeto(db.Model):
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]
             d["comentarios"] = [c.to_dict() for c in Comentario.query.filter_by(
-                projeto_id=self.projeto_id
+                objeto_id=self.id
             ).order_by(Comentario.criado_em.desc()).all()]
         return d
 
 
-# ─── ProjetoFase (histórico de fases do projeto) ─────────────────────────────
 
-class ProjetoFase(db.Model):
-    __tablename__ = "projeto_fase"
+# ─── ObjetoFase (histórico de fases do objeto) ─────────────────────────────
+
+class ObjetoFase(db.Model):
+    __tablename__ = "objeto_fase"
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    projeto_id = db.Column(db.Integer, db.ForeignKey("projetos.projeto_id"), nullable=False)
+    objeto_id = db.Column(db.Integer, db.ForeignKey("objetos.id"), nullable=False)
     id_fase = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=False)
     data_entrada = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     data_saida = db.Column(db.DateTime, nullable=True)  # NULL = fase ativa
@@ -233,7 +282,7 @@ class ProjetoFase(db.Model):
     # Relacionamentos
     fase = db.relationship("Fase")
     responsavel_fase = db.relationship("Funcionario", foreign_keys=[responsavel_fase_id])
-    funcionarios = db.relationship("Funcionario", secondary=projeto_fase_funcionario,
+    funcionarios = db.relationship("Funcionario", secondary=objeto_fase_funcionario,
                                     backref="fases_atribuidas", lazy="subquery")
 
     def dias_na_fase(self):
@@ -269,7 +318,8 @@ class ProjetoFase(db.Model):
 class Comentario(db.Model):
     __tablename__ = "comentarios"
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    projeto_id = db.Column(db.Integer, db.ForeignKey("projetos.projeto_id"), nullable=False)
+    projeto_id = db.Column(db.Integer, db.ForeignKey("projetos.projeto_id"), nullable=True) # Mantido opcional para comentários macro
+    objeto_id = db.Column(db.Integer, db.ForeignKey("objetos.id"), nullable=True) # Novo vínculo para comentários no objeto
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
     texto = db.Column(db.Text, nullable=False)
     criado_em = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -281,8 +331,10 @@ class Comentario(db.Model):
         return {
             "id": self.id,
             "projeto_id": self.projeto_id,
+            "objeto_id": self.objeto_id,
             "usuario_id": self.usuario_id,
             "autor_nome": self.usuario.nome if self.usuario else "",
             "texto": self.texto,
             "criado_em": self.criado_em.isoformat() if self.criado_em else "",
         }
+

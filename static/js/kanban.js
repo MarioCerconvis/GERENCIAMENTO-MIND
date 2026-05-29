@@ -68,7 +68,7 @@ function renderBoard(data) {
                     <span style="color: ${headerColor};">●</span>
                     ${col.nome}
                 </div>
-                <span class="column-count">${col.projetos.length}</span>
+                <span class="column-count">${col.objetos.length}</span>
             </div>
             <div class="column-body" data-fase-id="${col.id ?? 'sem_fase'}"></div>
         `;
@@ -78,10 +78,10 @@ function renderBoard(data) {
 
         const body = column.querySelector(".column-body");
 
-        if (col.projetos.length === 0) {
-            body.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div>Nenhum projeto</div>`;
+        if (col.objetos.length === 0) {
+            body.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div>Nenhum card</div>`;
         } else {
-            col.projetos.forEach(p => {
+            col.objetos.forEach(p => {
                 body.appendChild(createCard(p));
             });
         }
@@ -100,7 +100,7 @@ function renderBoard(data) {
 function createCard(projeto) {
     const card = document.createElement("div");
     card.className = "project-card";
-    card.dataset.projetoId = projeto.id;
+    card.dataset.objetoId = projeto.id;
     card.draggable = ["admin", "gestor"].includes(currentUser?.perfil);
 
     const sla = projeto.sla || {};
@@ -130,9 +130,9 @@ function createCard(projeto) {
     }
 
     card.innerHTML = `
-        <div class="card-os">${projeto.os}</div>
+        <div class="card-os">${projeto.projeto_os} <span style="font-size:0.8em; color:#64748b; font-weight:normal;">- ${projeto.nome}</span></div>
         <div class="card-cliente">${projeto.cliente || "—"}</div>
-        ${projeto.atividade ? `<div class="card-atividade">${projeto.atividade}</div>` : ""}
+        
         <div class="card-footer">
             <span class="sla-badge ${slaClass}">${slaIcon} ${slaDias}</span>
             <span class="card-days">${diasFase}</span>
@@ -155,10 +155,10 @@ function createCard(projeto) {
 
 // ─── Drag & Drop ─────────────────────────────────────────────────────────────
 
-let draggedProjectId = null;
+let draggedObjetoId = null;
 
 function handleDragStart(e) {
-    draggedProjectId = e.target.dataset.projetoId;
+    draggedObjetoId = e.target.dataset.objetoId;
     e.target.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
 }
@@ -184,12 +184,12 @@ async function handleDrop(e) {
     e.preventDefault();
     e.currentTarget.classList.remove("drag-over");
     const faseId = e.currentTarget.dataset.faseId;
-    if (!draggedProjectId || faseId === "sem_fase") return;
+    if (!draggedObjetoId || faseId === "sem_fase") return;
 
-    pendingMove = { projetoId: draggedProjectId, faseId: parseInt(faseId), isInline: false };
+    pendingMove = { projetoId: draggedObjetoId, faseId: parseInt(faseId), isInline: false };
     document.getElementById("mover-data-limite").value = "";
     abrirModal("modal-mover-fase");
-    draggedProjectId = null;
+    draggedObjetoId = null;
 }
 
 function cancelarMoverFase() {
@@ -206,14 +206,14 @@ document.getElementById("btn-confirmar-mover")?.addEventListener("click", async 
         payload.data_limite_fase = dataLimite;
     }
     
-    const res = await fetch(`/api/projetos/${pendingMove.projetoId}/mover-fase`, {
+    const res = await fetch(`/api/objetos/${pendingMove.projetoId}/mover-fase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
     });
 
     if (res.ok) {
-        showToast("Projeto movido com sucesso!", "success");
+        showToast("Card movido com sucesso!", "success");
         fecharModal("modal-mover-fase");
         if (pendingMove.isInline) fecharModal("modal-detalhe");
         await loadBoard();
@@ -280,18 +280,80 @@ function setupEventListeners() {
 
 // ─── New Project Modal ───────────────────────────────────────────────────────
 
+
+let moduloCount = 0;
+
+function adicionarModuloUI(dadosModulo = null) {
+    if (moduloCount >= 6) {
+        showToast("Limite de 6 módulos atingido.", "error");
+        return;
+    }
+    
+    moduloCount++;
+    const container = document.getElementById("modulos-list");
+    
+    const responsavelOptions = allFuncionarios.map(f => `<option value="${f.id}" ${dadosModulo && dadosModulo.responsavel_id === f.id ? 'selected' : ''}>${f.nome}</option>`).join("");
+    const faseOptions = allFases.map(f => `<option value="${f.id}" ${dadosModulo && dadosModulo.fase_atual_id === f.id ? 'selected' : ''}>${f.nome}</option>`).join("");
+    
+    const modHtml = `
+        <div class="modulo-item" id="modulo-${moduloCount}" style="border: 1px solid #e2e8f0; padding: 12px; margin-bottom: 12px; border-radius: 6px; background: #f8fafc;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong>Módulo ${moduloCount}</strong>
+                ${moduloCount > 1 ? `<button type="button" class="btn btn-ghost btn-sm" onclick="removerModuloUI('modulo-${moduloCount}')" style="color: red;">Remover</button>` : ''}
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Nome do Módulo *</label>
+                    <input type="text" class="mod-nome" required value="${dadosModulo ? dadosModulo.nome : 'Módulo ' + moduloCount}">
+                </div>
+                <div class="form-group">
+                    <label>Fase Inicial</label>
+                    <select class="mod-fase">
+                        <option value="">Sem fase</option>
+                        ${faseOptions}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Data Limite do Módulo</label>
+                    <input type="date" class="mod-data" value="${dadosModulo && dadosModulo.data_limite ? dadosModulo.data_limite.split('T')[0] : ''}">
+                </div>
+                <div class="form-group">
+                    <label>Responsável</label>
+                    <select class="mod-responsavel">
+                        <option value="">(Mesmo da OS se vazio)</option>
+                        ${responsavelOptions}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Descrição do Módulo</label>
+                <textarea class="mod-descricao" rows="1">${dadosModulo ? dadosModulo.descricao : ''}</textarea>
+            </div>
+        </div>
+    `;
+    container.insertAdjacentHTML('beforeend', modHtml);
+}
+
+function removerModuloUI(id) {
+    document.getElementById(id).remove();
+    moduloCount--;
+}
+
 async function openNewProject() {
     await loadSelectData();
-    document.getElementById("modal-projeto-titulo").textContent = "Novo Projeto";
+    document.getElementById("modal-projeto-titulo").textContent = "Novo Projeto (OS)";
     document.getElementById("proj-id").value = "";
     document.getElementById("proj-os").value = "";
     document.getElementById("proj-cliente").value = "";
     document.getElementById("proj-solicitante").value = "";
-    document.getElementById("proj-atividade").value = "";
     document.getElementById("proj-data-limite").value = "";
     document.getElementById("proj-descricao").value = "";
     document.getElementById("proj-comentario").value = "";
-    if(document.getElementById("proj-fase-data-limite")) document.getElementById("proj-fase-data-limite").value = "";
 
     // Populate selects
     const respSelect = document.getElementById("proj-responsavel");
@@ -300,32 +362,54 @@ async function openNewProject() {
         respSelect.innerHTML += `<option value="${f.id}">${f.nome}</option>`;
     });
 
-    const faseSelect = document.getElementById("proj-fase");
-    faseSelect.innerHTML = '<option value="">Sem fase</option>';
-    allFases.forEach(f => {
-        faseSelect.innerHTML += `<option value="${f.id}">${f.nome}</option>`;
-    });
+    // Reset modules
+    document.getElementById("modulos-list").innerHTML = "";
+    moduloCount = 0;
+    adicionarModuloUI(); // Adiciona 1 módulo por padrão
+    document.getElementById("modulos-container").style.display = "block";
 
     abrirModal("modal-projeto");
 }
 
 async function saveProject() {
     const id = document.getElementById("proj-id").value;
+    
+    // Obter dados da OS
     const data = {
         os: document.getElementById("proj-os").value,
         cliente: document.getElementById("proj-cliente").value,
         solicitante: document.getElementById("proj-solicitante").value,
-        atividade: document.getElementById("proj-atividade").value,
         data_limite: document.getElementById("proj-data-limite").value,
         descricao: document.getElementById("proj-descricao").value,
         comentario: document.getElementById("proj-comentario").value,
-        responsavel_id: document.getElementById("proj-responsavel").value || null,
-        fase_id: document.getElementById("proj-fase").value || null,
-        fase_data_limite: document.getElementById("proj-fase-data-limite") ? document.getElementById("proj-fase-data-limite").value : null,
+        responsavel_id: document.getElementById("proj-responsavel").value ? parseInt(document.getElementById("proj-responsavel").value) : null,
+        objetos: []
     };
 
-    if (data.responsavel_id) data.responsavel_id = parseInt(data.responsavel_id);
-    if (data.fase_id) data.fase_id = parseInt(data.fase_id);
+    if (!id) {
+        // Obter dados dos módulos (apenas na criação)
+        const moduloElements = document.querySelectorAll(".modulo-item");
+        moduloElements.forEach(mod => {
+            const modNome = mod.querySelector(".mod-nome").value;
+            const modFase = mod.querySelector(".mod-fase").value;
+            const modData = mod.querySelector(".mod-data").value;
+            const modResp = mod.querySelector(".mod-responsavel").value;
+            const modDesc = mod.querySelector(".mod-descricao").value;
+            
+            data.objetos.push({
+                nome: modNome,
+                fase_id: modFase ? parseInt(modFase) : null,
+                data_limite: modData || null,
+                responsavel_id: modResp ? parseInt(modResp) : null,
+                descricao: modDesc
+            });
+        });
+        
+        if (data.objetos.length === 0) {
+            showToast("Adicione pelo menos 1 módulo.", "error");
+            return;
+        }
+    }
 
     const url = id ? `/api/projetos/${id}` : "/api/projetos";
     const method = id ? "PUT" : "POST";
@@ -337,16 +421,13 @@ async function saveProject() {
 
     if (res.ok) {
         fecharModal("modal-projeto");
-        showToast(id ? "Projeto atualizado!" : "Projeto criado!", "success");
+        showToast(id ? "OS atualizada!" : "OS criada com sucesso!", "success");
         await loadBoard();
     } else {
         const err = await res.json();
         showToast(err.erro || "Erro ao salvar", "error");
     }
 }
-
-// ─── New Phase Modal ─────────────────────────────────────────────────────────
-
 async function openNewPhase() {
     await loadSelectData();
     document.getElementById("fase-nome").value = "";
@@ -388,13 +469,14 @@ async function savePhase() {
     }
 }
 
-async function openDetail(projetoId) {
+async function openDetail(objetoId) {
+    const projetoId = objetoId;
     await loadSelectData();
-    const res = await fetch(`/api/projetos/${projetoId}`);
+    const res = await fetch(`/api/objetos/${objetoId}`);
     if (!res.ok) return;
     const p = await res.json();
 
-    document.getElementById("detalhe-titulo").textContent = `Projeto ${p.os}`;
+    document.getElementById("detalhe-titulo").textContent = `${p.projeto_os} - ${p.nome}`;
 
     const sla = p.sla || {};
     const slaClass = sla.flag === "Dentro do SLA" ? "dentro" : "fora";
@@ -433,7 +515,7 @@ async function openDetail(projetoId) {
 
     html += `
         <div class="detail-grid">
-            <div class="detail-item"><span class="detail-label">OS</span><span class="detail-value">${p.os}</span></div>
+            <div class="detail-item"><span class="detail-label">OS</span><span class="detail-value">${p.projeto_os}</span></div>
             <div class="detail-item"><span class="detail-label">Cliente</span><span class="detail-value">${p.cliente || "—"}</span></div>
             <div class="detail-item"><span class="detail-label">Solicitante</span><span class="detail-value">${p.solicitante || "—"}</span></div>
             <div class="detail-item"><span class="detail-label">Atividade</span><span class="detail-value">${p.atividade || "—"}</span></div>
@@ -509,8 +591,8 @@ async function openDetail(projetoId) {
     if (["admin", "gestor"].includes(currentUser?.perfil)) {
         html += `
             <div style="display:flex;gap:10px;margin-top:24px;">
-                <button class="btn btn-ghost" onclick="openEditProject(${p.id})">Editar</button>
-                ${currentUser.perfil === "admin" ? `<button class="btn btn-danger btn-sm" onclick="deleteProject(${p.id})">Excluir</button>` : ""}
+                <button class="btn btn-ghost" onclick="openEditProject(${p.projeto_id})">Editar</button>
+                ${currentUser.perfil === "admin" ? `<button class="btn btn-danger btn-sm" onclick="deleteObject(${p.id})">Excluir</button>` : ""}
             </div>
         `;
     }
@@ -533,12 +615,12 @@ async function moverFaseInline(projetoId) {
 
 // ─── Comentários ─────────────────────────────────────────────────────────────
 
-async function enviarComentario(projetoId) {
+async function enviarComentario(objetoId) {
     const textarea = document.getElementById("novo-comentario");
     const texto = textarea.value.trim();
     if (!texto) { showToast("Escreva um comentário", "error"); return; }
 
-    const res = await fetch(`/api/projetos/${projetoId}/comentarios`, {
+    const res = await fetch(`/api/objetos/${objetoId}/comentarios`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ texto }),
@@ -554,18 +636,19 @@ async function enviarComentario(projetoId) {
     }
 }
 
-async function openEditProject(id) {
+
+async function openEditProject(osId) {
     fecharModal("modal-detalhe");
     await loadSelectData();
-    const res = await fetch(`/api/projetos/${id}`);
+    const res = await fetch(`/api/projetos/${osId}`);
+    if (!res.ok) return;
     const p = await res.json();
 
-    document.getElementById("modal-projeto-titulo").textContent = "Editar Projeto";
+    document.getElementById("modal-projeto-titulo").textContent = "Editar OS";
     document.getElementById("proj-id").value = p.id;
     document.getElementById("proj-os").value = p.os;
     document.getElementById("proj-cliente").value = p.cliente;
     document.getElementById("proj-solicitante").value = p.solicitante;
-    document.getElementById("proj-atividade").value = p.atividade;
     document.getElementById("proj-data-limite").value = p.data_limite;
     document.getElementById("proj-descricao").value = p.descricao;
     document.getElementById("proj-comentario").value = p.comentario;
@@ -577,26 +660,24 @@ async function openEditProject(id) {
         respSelect.innerHTML += `<option value="${f.id}" ${sel}>${f.nome}</option>`;
     });
 
-    const faseSelect = document.getElementById("proj-fase");
-    faseSelect.innerHTML = '<option value="">Sem fase</option>';
-    allFases.forEach(f => {
-        const sel = f.id === p.fase_atual_id ? "selected" : "";
-        faseSelect.innerHTML += `<option value="${f.id}" ${sel}>${f.nome}</option>`;
-    });
+    // Ocultar criação de módulos no edit
+    document.getElementById("modulos-container").style.display = "none";
 
     abrirModal("modal-projeto");
 }
 
-async function deleteProject(id) {
-    if (!confirm("Tem certeza que deseja excluir este projeto?")) return;
-    const res = await fetch(`/api/projetos/${id}`, { method: "DELETE" });
+async function deleteObject(id) {
+    if (!confirm("Tem certeza que deseja excluir este módulo?")) return;
+    const res = await fetch(`/api/objetos/${id}`, { method: "DELETE" });
     if (res.ok) {
         fecharModal("modal-detalhe");
-        showToast("Projeto excluído!", "success");
+        showToast("Módulo excluído!", "success");
         await loadBoard();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao excluir", "error");
     }
 }
-
 // ─── Assign Employee ─────────────────────────────────────────────────────────
 
 async function openAssign(projetoFaseId, faseId) {
@@ -620,7 +701,7 @@ async function confirmAssign() {
     const funcId = document.getElementById("atribuir-funcionario").value;
     if (!funcId) { showToast("Selecione um funcionário", "error"); return; }
 
-    const res = await fetch(`/api/projeto-fase/${pfId}/atribuir`, {
+    const res = await fetch(`/api/objeto-fase/${pfId}/atribuir`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ funcionario_id: parseInt(funcId) }),

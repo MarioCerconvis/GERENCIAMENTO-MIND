@@ -7,8 +7,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from config import Config
 from models import (
     db, configure_db, Usuario, Funcionario, Funcao, Fase,
-    Projeto, ProjetoFase, Comentario, funcionario_funcao, fase_funcao,
-    projeto_fase_funcionario,
+    Projeto, Objeto, ObjetoFase, Comentario, funcionario_funcao, fase_funcao,
+    objeto_fase_funcionario,
 )
 from auth import get_usuario_logado, requer_login, requer_perfil, requer_perfil_api, get_abas_usuario
 from notifications import notificar_atribuicao, notificar_mudanca_fase
@@ -407,33 +407,20 @@ def api_reordenar_fases():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  API: PROJETOS
+#  API: PROJETOS & OBJETOS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/projetos", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_listar_projetos():
-    u = get_usuario_logado()
-    query = Projeto.query
-    # Funcionário só vê projetos onde está atribuído
-    if u.perfil == "funcionario" and u.funcionario:
-        func_id = u.funcionario.id_func
-        query = query.join(ProjetoFase).join(
-            projeto_fase_funcionario,
-            projeto_fase_funcionario.c.id_projeto_fase == ProjetoFase.id,
-        ).filter(
-            projeto_fase_funcionario.c.id_funcionario == func_id
-        ).distinct()
-    projetos = query.all()
+    projetos = Projeto.query.all()
     return jsonify([p.to_dict() for p in projetos])
-
 
 @app.route("/api/projetos/<int:pid>", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_detalhe_projeto(pid):
     p = Projeto.query.get_or_404(pid)
     return jsonify(p.to_dict(include_historico=True))
-
 
 @app.route("/api/projetos", methods=["POST"])
 @requer_perfil_api("admin", "gestor")
@@ -444,12 +431,19 @@ def api_criar_projeto():
         return jsonify({"erro": "OS é obrigatório"}), 400
     if Projeto.query.filter_by(os=os_code).first():
         return jsonify({"erro": "OS já existe"}), 409
+    
     data_limite = body.get("data_limite")
     if not data_limite:
         return jsonify({"erro": "Data limite é obrigatória"}), 400
-    novo = Projeto(
+
+    objetos_data = body.get("objetos", [])
+    if not objetos_data:
+        return jsonify({"erro": "Ao menos 1 módulo (objeto) é obrigatório."}), 400
+    if len(objetos_data) > 6:
+        return jsonify({"erro": "Limite máximo de 6 módulos (objetos) por OS."}), 400
+
+    novo_proj = Projeto(
         os=os_code,
-        atividade=body.get("atividade", ""),
         cliente=body.get("cliente", ""),
         solicitante=body.get("solicitante", ""),
         descricao=body.get("descricao", ""),
@@ -457,29 +451,44 @@ def api_criar_projeto():
         data_limite=date.fromisoformat(data_limite),
         responsavel_id=body.get("responsavel_id"),
     )
-    # Se uma fase inicial foi selecionada
-    fase_id = body.get("fase_id")
-    if fase_id:
-        fase = db.session.get(Fase, fase_id)
-        if fase:
-            novo.fase_atual_id = fase_id
-            db.session.add(novo)
-            db.session.flush()  # Para obter o ID
-            
-            data_limite_fase_str = body.get("fase_data_limite")
-            data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
-            
-            pf = ProjetoFase(
-                projeto_id=novo.projeto_id,
+    db.session.add(novo_proj)
+    db.session.flush()
+
+    for obj_data in objetos_data:
+        fase_id = obj_data.get("fase_id")
+        
+        # O data_limite do módulo
+        obj_data_limite_str = obj_data.get("data_limite")
+        obj_data_limite = date.fromisoformat(obj_data_limite_str) if obj_data_limite_str else novo_proj.data_limite
+        
+        # O data limite da fase (se diferente, mas na UI só tem um, então usaremos o do módulo)
+        data_limite_fase = obj_data_limite
+        
+        # Se não enviou nome, usa nome padrão
+        nome_obj = obj_data.get("nome", "").strip() or "Módulo 1"
+
+        novo_obj = Objeto(
+            projeto_id=novo_proj.projeto_id,
+            nome=nome_obj,
+            descricao=obj_data.get("descricao", ""),
+            data_limite=obj_data_limite,
+            responsavel_id=obj_data.get("responsavel_id", novo_proj.responsavel_id),
+            fase_atual_id=fase_id
+        )
+        db.session.add(novo_obj)
+        db.session.flush()
+
+        if fase_id:
+            of = ObjetoFase(
+                objeto_id=novo_obj.id,
                 id_fase=fase_id,
-                responsavel_fase_id=body.get("responsavel_id"),
+                responsavel_fase_id=novo_obj.responsavel_id,
                 data_limite=data_limite_fase
             )
-            db.session.add(pf)
-    else:
-        db.session.add(novo)
+            db.session.add(of)
+
     db.session.commit()
-    return jsonify(novo.to_dict()), 201
+    return jsonify(novo_proj.to_dict()), 201
 
 
 @app.route("/api/projetos/<int:pid>", methods=["PUT"])
@@ -487,7 +496,7 @@ def api_criar_projeto():
 def api_editar_projeto(pid):
     p = Projeto.query.get_or_404(pid)
     body = request.get_json()
-    for field in ("os", "atividade", "cliente", "solicitante", "descricao", "comentario"):
+    for field in ("os", "cliente", "solicitante", "descricao", "comentario"):
         if field in body:
             setattr(p, field, body[field].strip() if isinstance(body[field], str) else body[field])
     if "data_limite" in body:
@@ -497,26 +506,108 @@ def api_editar_projeto(pid):
     db.session.commit()
     return jsonify(p.to_dict())
 
-
 @app.route("/api/projetos/<int:pid>", methods=["DELETE"])
 @requer_perfil_api("admin")
 def api_deletar_projeto(pid):
     p = Projeto.query.get_or_404(pid)
-    # Deletar histórico de fases
-    ProjetoFase.query.filter_by(projeto_id=pid).delete()
     db.session.delete(p)
     db.session.commit()
     return jsonify({"ok": True})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  API: KANBAN — Mover projeto entre fases
+#  API: OBJETOS (Cards Individuais)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.route("/api/projetos/<int:pid>/mover-fase", methods=["POST"])
+@app.route("/api/objetos/<int:oid>", methods=["GET"])
+@requer_perfil_api("admin", "gestor", "funcionario")
+def api_detalhe_objeto(oid):
+    o = Objeto.query.get_or_404(oid)
+    return jsonify(o.to_dict(include_historico=True))
+
+
+@app.route("/api/objetos/<int:oid>", methods=["PUT"])
 @requer_perfil_api("admin", "gestor")
-def api_mover_fase(pid):
+def api_editar_objeto(oid):
+    o = Objeto.query.get_or_404(oid)
+    body = request.get_json()
+    if "nome" in body:
+        o.nome = body["nome"].strip()
+    if "descricao" in body:
+        o.descricao = body["descricao"].strip()
+    if "data_limite" in body:
+        o.data_limite = date.fromisoformat(body["data_limite"])
+    if "responsavel_id" in body:
+        o.responsavel_id = body["responsavel_id"]
+    db.session.commit()
+    return jsonify(o.to_dict())
+
+
+@app.route("/api/projetos/<int:pid>/objetos", methods=["POST"])
+@requer_perfil_api("admin", "gestor")
+def api_criar_objeto(pid):
     p = Projeto.query.get_or_404(pid)
+    
+    if p.objetos.count() >= 6:
+        return jsonify({"erro": "Limite máximo de 6 objetos por projeto atingido."}), 400
+
+    body = request.get_json()
+    nome = body.get("nome", "").strip()
+    if not nome:
+        return jsonify({"erro": "Nome do módulo é obrigatório"}), 400
+        
+    fase_id = body.get("fase_id")
+    data_limite_str = body.get("data_limite")
+    data_limite = date.fromisoformat(data_limite_str) if data_limite_str else p.data_limite
+    responsavel_id = body.get("responsavel_id", p.responsavel_id)
+
+    novo_obj = Objeto(
+        projeto_id=pid,
+        nome=nome,
+        descricao=body.get("descricao", ""),
+        data_limite=data_limite,
+        responsavel_id=responsavel_id,
+        fase_atual_id=fase_id
+    )
+    db.session.add(novo_obj)
+    db.session.flush()
+
+    if fase_id:
+        data_limite_fase_str = body.get("fase_data_limite")
+        data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
+        of = ObjetoFase(
+            objeto_id=novo_obj.id,
+            id_fase=fase_id,
+            responsavel_fase_id=responsavel_id,
+            data_limite=data_limite_fase
+        )
+        db.session.add(of)
+
+    db.session.commit()
+    return jsonify(novo_obj.to_dict()), 201
+
+
+@app.route("/api/objetos/<int:oid>", methods=["DELETE"])
+@requer_perfil_api("admin", "gestor")
+def api_deletar_objeto(oid):
+    o = Objeto.query.get_or_404(oid)
+    # Verifica se é o único objeto da OS. Se sim, não deve permitir (ou excluir a OS toda)
+    if o.projeto.objetos.count() <= 1:
+        return jsonify({"erro": "Não é possível excluir o único módulo de uma OS. Exclua a OS inteira."}), 400
+        
+    db.session.delete(o)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  API: KANBAN — Mover objeto entre fases
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/objetos/<int:oid>/mover-fase", methods=["POST"])
+@requer_perfil_api("admin", "gestor")
+def api_mover_fase(oid):
+    o = Objeto.query.get_or_404(oid)
     body = request.get_json()
     nova_fase_id = body.get("fase_id")
     if not nova_fase_id:
@@ -524,8 +615,9 @@ def api_mover_fase(pid):
     nova_fase = Fase.query.get_or_404(nova_fase_id)
     if nova_fase.ativa == False:
         return jsonify({"erro": "Esta fase está desativada e não pode receber novos cards."}), 400
+    
     # Fechar fase atual
-    fase_ativa = ProjetoFase.query.filter_by(projeto_id=pid, data_saida=None).first()
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
         
@@ -533,37 +625,38 @@ def api_mover_fase(pid):
     data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
     
     # Abrir nova fase
-    pf = ProjetoFase(
-        projeto_id=pid,
+    of = ObjetoFase(
+        objeto_id=oid,
         id_fase=nova_fase_id,
-        responsavel_fase_id=body.get("responsavel_fase_id", p.responsavel_id),
+        responsavel_fase_id=body.get("responsavel_fase_id", o.responsavel_id),
         data_limite=data_limite_fase
     )
-    db.session.add(pf)
-    p.fase_atual_id = nova_fase_id
+    db.session.add(of)
+    o.fase_atual_id = nova_fase_id
     if body.get("responsavel_fase_id"):
-        p.responsavel_id = body["responsavel_fase_id"]
+        o.responsavel_id = body["responsavel_fase_id"]
     db.session.commit()
+    
     # Notificar equipe da nova fase
-    if pf.funcionarios:
-        notificar_mudanca_fase(p, nova_fase, pf.funcionarios)
-    return jsonify(p.to_dict())
+    if of.funcionarios:
+        notificar_mudanca_fase(o.projeto, o, nova_fase, of.funcionarios)
+    return jsonify(o.to_dict())
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  API: Atribuir funcionários a uma fase do projeto
+#  API: Atribuir funcionários a uma fase do objeto
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.route("/api/projeto-fase/<int:pf_id>/atribuir", methods=["POST"])
+@app.route("/api/objeto-fase/<int:of_id>/atribuir", methods=["POST"])
 @requer_perfil_api("admin", "gestor")
-def api_atribuir_funcionario(pf_id):
-    pf = ProjetoFase.query.get_or_404(pf_id)
+def api_atribuir_funcionario(of_id):
+    of = ObjetoFase.query.get_or_404(of_id)
     body = request.get_json()
     func_id = body.get("funcionario_id")
     if not func_id:
         return jsonify({"erro": "funcionario_id é obrigatório"}), 400
     funcionario = Funcionario.query.get_or_404(func_id)
-    fase = db.session.get(Fase, pf.id_fase)
+    fase = db.session.get(Fase, of.id_fase)
     # Validar: funcionário deve ter uma das funções exigidas pela fase
     if fase and fase.funcoes_exigidas:
         funcoes_func = {f.id_funcao for f in funcionario.funcoes}
@@ -574,27 +667,27 @@ def api_atribuir_funcionario(pf_id):
                 "erro": f"O funcionário '{funcionario.nome}' não possui as funções exigidas por esta fase. Funções necessárias: {nomes_exigidas}"
             }), 400
     # Verificar se já está atribuído
-    if funcionario in pf.funcionarios:
+    if funcionario in of.funcionarios:
         return jsonify({"erro": "Funcionário já atribuído a esta fase"}), 409
-    pf.funcionarios.append(funcionario)
+    of.funcionarios.append(funcionario)
     db.session.commit()
     # Notificar
-    projeto = db.session.get(Projeto, pf.projeto_id)
-    notificar_atribuicao(funcionario, projeto, fase)
-    return jsonify(pf.to_dict())
+    objeto = db.session.get(Objeto, of.objeto_id)
+    notificar_atribuicao(funcionario, objeto.projeto, fase, objeto)
+    return jsonify(of.to_dict())
 
 
-@app.route("/api/projeto-fase/<int:pf_id>/remover", methods=["POST"])
+@app.route("/api/objeto-fase/<int:of_id>/remover", methods=["POST"])
 @requer_perfil_api("admin", "gestor")
-def api_remover_funcionario_fase(pf_id):
-    pf = ProjetoFase.query.get_or_404(pf_id)
+def api_remover_funcionario_fase(of_id):
+    of = ObjetoFase.query.get_or_404(of_id)
     body = request.get_json()
     func_id = body.get("funcionario_id")
     funcionario = Funcionario.query.get_or_404(func_id)
-    if funcionario in pf.funcionarios:
-        pf.funcionarios.remove(funcionario)
+    if funcionario in of.funcionarios:
+        of.funcionarios.remove(funcionario)
         db.session.commit()
-    return jsonify(pf.to_dict())
+    return jsonify(of.to_dict())
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -604,31 +697,39 @@ def api_remover_funcionario_fase(pf_id):
 @app.route("/api/kanban", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_kanban():
-    """Retorna dados do board Kanban: fases como colunas + projetos."""
+    """Retorna dados do board Kanban: fases como colunas + objetos."""
     u = get_usuario_logado()
     fases = Fase.query.filter(db.or_(Fase.ativa == True, Fase.ativa == None)).order_by(Fase.ordem).all()
-    projetos_query = Projeto.query
+    
+    objetos_query = Objeto.query
     if u.perfil == "funcionario" and u.funcionario:
         func_id = u.funcionario.id_func
-        projetos_query = projetos_query.join(ProjetoFase).join(
-            projeto_fase_funcionario,
-            projeto_fase_funcionario.c.id_projeto_fase == ProjetoFase.id,
+        objetos_query = objetos_query.join(ObjetoFase).join(
+            objeto_fase_funcionario,
+            objeto_fase_funcionario.c.id_objeto_fase == ObjetoFase.id,
         ).filter(
-            projeto_fase_funcionario.c.id_funcionario == func_id
+            objeto_fase_funcionario.c.id_funcionario == func_id
         ).distinct()
-    projetos = projetos_query.all()
+    
+    objetos = objetos_query.all()
+    
     # Montar board
     board = {}
     for fase in fases:
         board[fase.id_fase] = {
             **fase.to_dict(include_funcoes=False),
-            "projetos": [],
+            "projetos": [], # Mantemos a chave "projetos" por compatibilidade com JS (ou mudamos para objetos no JS)
+            "objetos": [],
         }
-    # Projetos sem fase
-    board["sem_fase"] = {"id": None, "nome": "Sem Fase", "cor": "#94a3b8", "ordem": -1, "projetos": []}
-    for p in projetos:
-        key = p.fase_atual_id if p.fase_atual_id and p.fase_atual_id in board else "sem_fase"
-        board[key]["projetos"].append(p.to_dict())
+    board["sem_fase"] = {"id": None, "nome": "Sem Fase", "cor": "#94a3b8", "ordem": -1, "projetos": [], "objetos": []}
+    
+    for o in objetos:
+        key = o.fase_atual_id if o.fase_atual_id and o.fase_atual_id in board else "sem_fase"
+        board[key]["objetos"].append(o.to_dict())
+        # Alias "projetos" = "objetos" pra evitar quebrar o JS imediatamente, 
+        # embora o ideal seja renomear no frontend.
+        board[key]["projetos"].append(o.to_dict())
+        
     return jsonify(list(board.values()))
 
 
@@ -641,7 +742,6 @@ def api_kanban():
 def api_funcionarios_elegiveis(fid):
     fase = Fase.query.get_or_404(fid)
     if not fase.funcoes_exigidas:
-        # Se a fase não exige função, todos são elegíveis
         funcionarios = Funcionario.query.all()
     else:
         funcao_ids = [f.id_funcao for f in fase.funcoes_exigidas]
@@ -654,22 +754,48 @@ def api_funcionarios_elegiveis(fid):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  API: Comentários do projeto
+#  API: Comentários
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/objetos/<int:oid>/comentarios", methods=["GET"])
+@requer_perfil_api("admin", "gestor", "funcionario")
+def api_listar_comentarios_objeto(oid):
+    Objeto.query.get_or_404(oid)
+    comentarios = Comentario.query.filter_by(objeto_id=oid).order_by(
+        Comentario.criado_em.desc()
+    ).all()
+    return jsonify([c.to_dict() for c in comentarios])
+
+@app.route("/api/objetos/<int:oid>/comentarios", methods=["POST"])
+@requer_perfil_api("admin", "gestor", "funcionario")
+def api_criar_comentario_objeto(oid):
+    Objeto.query.get_or_404(oid)
+    u = get_usuario_logado()
+    body = request.get_json()
+    texto = body.get("texto", "").strip()
+    if not texto:
+        return jsonify({"erro": "Texto é obrigatório"}), 400
+    comentario = Comentario(
+        objeto_id=oid,
+        usuario_id=u.id,
+        texto=texto,
+    )
+    db.session.add(comentario)
+    db.session.commit()
+    return jsonify(comentario.to_dict()), 201
 
 @app.route("/api/projetos/<int:pid>/comentarios", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
-def api_listar_comentarios(pid):
+def api_listar_comentarios_projeto(pid):
     Projeto.query.get_or_404(pid)
     comentarios = Comentario.query.filter_by(projeto_id=pid).order_by(
         Comentario.criado_em.desc()
     ).all()
     return jsonify([c.to_dict() for c in comentarios])
 
-
 @app.route("/api/projetos/<int:pid>/comentarios", methods=["POST"])
 @requer_perfil_api("admin", "gestor", "funcionario")
-def api_criar_comentario(pid):
+def api_criar_comentario_projeto(pid):
     Projeto.query.get_or_404(pid)
     u = get_usuario_logado()
     body = request.get_json()

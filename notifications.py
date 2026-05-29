@@ -48,49 +48,61 @@ def _email_wrap(title, color, rows):
     return f'<div style="font-family:Segoe UI,Arial,sans-serif;max-width:600px;"><h2 style="color:{color};">{title}</h2><table style="border-collapse:collapse;width:100%;margin:16px 0;">{trs}</table><p style="font-size:12px;color:#94a3b8;">Gerenciamento MIND</p></div>'
 
 
-def notificar_atribuicao(funcionario, projeto, fase):
-    corpo = _email_wrap("Nova Atribuicao de Projeto", "#6366f1", [
-        ("Projeto (OS):", f"<strong>{projeto.os}</strong>"),
+def notificar_atribuicao(funcionario, projeto, fase, objeto=None):
+    obj_str = f" - {objeto.nome}" if objeto else ""
+    corpo = _email_wrap("Nova Atribuição de Módulo", "#6366f1", [
+        ("Projeto (OS):", f"<strong>{projeto.os}{obj_str}</strong>"),
         ("Cliente:", projeto.cliente or ""),
         ("Fase:", f'<span style="background:{fase.cor};color:white;padding:2px 10px;border-radius:12px;">{fase.nome_fase}</span>'),
-        ("Prazo:", projeto.data_limite.strftime("%d/%m/%Y") if projeto.data_limite else "N/A"),
+        ("Prazo:", objeto.data_limite.strftime("%d/%m/%Y") if (objeto and objeto.data_limite) else (projeto.data_limite.strftime("%d/%m/%Y") if projeto.data_limite else "N/A")),
     ])
-    enviar_email([funcionario.email], f"[MIND] Nova atribuicao - {projeto.os} - {fase.nome_fase}", corpo)
+    enviar_email([funcionario.email], f"[MIND] Nova atribuição - {projeto.os}{obj_str} - {fase.nome_fase}", corpo)
 
 
 def notificar_sla_estourado(projeto, responsavel, dias_atraso):
     if not responsavel or not responsavel.email:
         return
-    corpo = _email_wrap("Projeto Fora do SLA", "#ef4444", [
+    corpo = _email_wrap("SLA Macro do Projeto Ultrapassado", "#ef4444", [
         ("Projeto (OS):", f"<strong>{projeto.os}</strong>"),
         ("Cliente:", projeto.cliente or ""),
         ("Dias de atraso:", f'<strong style="color:#ef4444;">{dias_atraso} dia(s)</strong>'),
-        ("Fase atual:", projeto.fase_atual.nome_fase if projeto.fase_atual else "Sem fase"),
         ("Prazo original:", projeto.data_limite.strftime("%d/%m/%Y") if projeto.data_limite else "N/A"),
     ])
-    enviar_email([responsavel.email], f"[MIND] SLA ultrapassado - {projeto.os} - {dias_atraso} dia(s)", corpo)
+    enviar_email([responsavel.email], f"[MIND] SLA Macro ultrapassado - {projeto.os} - {dias_atraso} dia(s)", corpo)
+
+def notificar_sla_objeto_estourado(projeto, objeto, responsavel, dias_atraso):
+    if not responsavel or not responsavel.email:
+        return
+    corpo = _email_wrap("SLA do Módulo Ultrapassado", "#ef4444", [
+        ("Projeto (OS):", f"<strong>{projeto.os} - {objeto.nome}</strong>"),
+        ("Cliente:", projeto.cliente or ""),
+        ("Dias de atraso:", f'<strong style="color:#ef4444;">{dias_atraso} dia(s)</strong>'),
+        ("Fase atual:", objeto.fase_atual.nome_fase if objeto.fase_atual else "Sem fase"),
+        ("Prazo original do Módulo:", objeto.data_limite.strftime("%d/%m/%Y") if objeto.data_limite else "N/A"),
+    ])
+    enviar_email([responsavel.email], f"[MIND] SLA Módulo ultrapassado - {projeto.os} - {objeto.nome}", corpo)
 
 
-def notificar_sla_fase_estourado(projeto, responsavel, dias_atraso, fase_nome):
+def notificar_sla_fase_estourado(projeto, objeto, responsavel, dias_atraso, fase_nome):
     if not responsavel or not responsavel.email:
         return
     corpo = _email_wrap("SLA da Fase Ultrapassado", "#ef4444", [
-        ("Projeto (OS):", f"<strong>{projeto.os}</strong>"),
+        ("Projeto (OS):", f"<strong>{projeto.os} - {objeto.nome}</strong>"),
         ("Cliente:", projeto.cliente or ""),
         ("Fase Atrasada:", fase_nome),
         ("Dias de atraso:", f'<strong style="color:#ef4444;">{dias_atraso} dia(s)</strong>'),
     ])
-    enviar_email([responsavel.email], f"[MIND] SLA Fase ultrapassado - {projeto.os} - {dias_atraso} dia(s)", corpo)
+    enviar_email([responsavel.email], f"[MIND] SLA Fase ultrapassado - {projeto.os} - {objeto.nome} - {fase_nome}", corpo)
 
 
-def notificar_mudanca_fase(projeto, fase_nova, equipe_nova):
+def notificar_mudanca_fase(projeto, objeto, fase_nova, equipe_nova):
     destinatarios = [f.email for f in equipe_nova if f.email]
     if not destinatarios:
         return
-    corpo = _email_wrap("Projeto Movido para Nova Fase", "#6366f1", [
-        ("Projeto (OS):", f"<strong>{projeto.os}</strong>"),
+    corpo = _email_wrap("Módulo Movido para Nova Fase", "#6366f1", [
+        ("Projeto (OS):", f"<strong>{projeto.os} - {objeto.nome}</strong>"),
         ("Cliente:", projeto.cliente or ""),
         ("Nova fase:", f'<span style="background:{fase_nova.cor};color:white;padding:2px 10px;border-radius:12px;">{fase_nova.nome_fase}</span>'),
-        ("Prazo:", projeto.data_limite.strftime("%d/%m/%Y") if projeto.data_limite else "N/A"),
+        ("Prazo do módulo:", objeto.data_limite.strftime("%d/%m/%Y") if objeto.data_limite else "N/A"),
     ])
-    enviar_email(destinatarios, f"[MIND] Projeto movido - {projeto.os} - {fase_nova.nome_fase}", corpo)
+    enviar_email(destinatarios, f"[MIND] Módulo movido - {projeto.os} - {objeto.nome} - {fase_nova.nome_fase}", corpo)

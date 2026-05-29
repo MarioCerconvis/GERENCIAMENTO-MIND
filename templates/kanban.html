@@ -28,12 +28,14 @@
 <div class="modal-overlay" id="modal-projeto" style="display:none;">
     <div class="modal-card modal-lg">
         <div class="modal-header">
-            <h2 id="modal-projeto-titulo">Novo Projeto</h2>
+            <h2 id="modal-projeto-titulo">Novo Projeto (OS)</h2>
             <button class="modal-close" onclick="fecharModal('modal-projeto')">&times;</button>
         </div>
         <div class="modal-body">
             <form id="form-projeto">
                 <input type="hidden" id="proj-id">
+                
+                <h3 style="margin-bottom: 12px; font-size: 16px; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">Informações da OS</h3>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="proj-os">OS (Ordem de Serviço) *</label>
@@ -50,43 +52,39 @@
                         <input type="text" id="proj-solicitante">
                     </div>
                     <div class="form-group">
-                        <label for="proj-atividade">Atividade</label>
-                        <input type="text" id="proj-atividade">
+                        <label for="proj-data-limite">Data Limite da OS *</label>
+                        <input type="date" id="proj-data-limite" required>
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="proj-data-limite">Data Limite *</label>
-                        <input type="date" id="proj-data-limite" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="proj-responsavel">Responsável</label>
+                        <label for="proj-responsavel">Responsável pela OS</label>
                         <select id="proj-responsavel"><option value="">Selecionar...</option></select>
                     </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="proj-fase">Fase Inicial</label>
-                        <select id="proj-fase"><option value="">Sem fase</option></select>
-                    </div>
-                    <div class="form-group">
-                        <label for="proj-fase-data-limite">Prazo Fase Inicial</label>
-                        <input type="date" id="proj-fase-data-limite">
-                    </div>
+                <div class="form-group">
+                    <label for="proj-descricao">Descrição (OS)</label>
+                    <textarea id="proj-descricao" rows="2"></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="proj-descricao">Descrição</label>
-                    <textarea id="proj-descricao" rows="3"></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="proj-comentario">Comentário</label>
+                    <label for="proj-comentario">Comentário Macro</label>
                     <textarea id="proj-comentario" rows="2"></textarea>
                 </div>
+
+                <div id="modulos-container" style="display: block;">
+                    <h3 style="margin-top: 20px; margin-bottom: 12px; font-size: 16px; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">Módulos (Objetos)</h3>
+                    <p style="font-size: 13px; color: #64748b; margin-bottom: 12px;">Adicione pelo menos 1 módulo à OS (Máximo 6).</p>
+                    
+                    <div id="modulos-list"></div>
+                    
+                    <button type="button" class="btn btn-ghost" id="btn-add-modulo" onclick="adicionarModuloUI()" style="margin-top: 8px; width: 100%; border: 1px dashed #cbd5e1; text-align: center; justify-content: center;">+ Adicionar Módulo</button>
+                </div>
+
             </form>
         </div>
         <div class="modal-footer">
             <button class="btn btn-ghost" onclick="fecharModal('modal-projeto')">Cancelar</button>
-            <button class="btn btn-primary" id="btn-salvar-projeto">Salvar</button>
+            <button class="btn btn-primary" id="btn-salvar-projeto">Salvar OS</button>
         </div>
     </div>
 </div>
