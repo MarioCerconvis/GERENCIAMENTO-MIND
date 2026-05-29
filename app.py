@@ -374,7 +374,7 @@ def api_deletar_fase(fid):
         return jsonify({"erro": "Não é possível excluir esta fase pois existem cards atualmente nela. Mova os cards primeiro."}), 400
     
     # Verificar se há histórico
-    em_historico = ProjetoFase.query.filter_by(id_fase=fid).first()
+    em_historico = ObjetoFase.query.filter_by(id_fase=fid).first()
     
     if em_historico:
         # Soft delete: desativar a fase
