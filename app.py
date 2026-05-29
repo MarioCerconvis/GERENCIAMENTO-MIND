@@ -367,8 +367,8 @@ def api_editar_fase(fid):
 def api_deletar_fase(fid):
     f = Fase.query.get_or_404(fid)
     
-    # Verificar se a fase possui projetos atualmente nela
-    em_uso_agora = Projeto.query.filter_by(fase_atual_id=fid).first()
+    # Verificar se a fase possui objetos (módulos) atualmente nela
+    em_uso_agora = Objeto.query.filter_by(fase_atual_id=fid).first()
     
     if em_uso_agora:
         return jsonify({"erro": "Não é possível excluir esta fase pois existem cards atualmente nela. Mova os cards primeiro."}), 400
