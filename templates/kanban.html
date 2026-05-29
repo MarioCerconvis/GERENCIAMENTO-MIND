@@ -13,6 +13,7 @@
             <option value="dentro">Dentro do SLA</option>
             <option value="fora">Fora do SLA</option>
         </select>
+        <button class="btn btn-ghost" id="btn-historico">Ver Histórico</button>
         <button class="btn btn-primary" id="btn-novo-projeto" style="display:none;">+ Novo Projeto</button>
         <button class="btn btn-ghost" id="btn-nova-fase" style="display:none;">+ Nova Fase</button>
         <a href="/admin" class="btn btn-ghost" id="btn-admin" style="display:none;">Admin</a>
@@ -179,6 +180,47 @@
         <div class="modal-footer">
             <button class="btn btn-ghost" onclick="cancelarMoverFase()">Cancelar</button>
             <button class="btn btn-primary" id="btn-confirmar-mover">Confirmar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Histórico de Atividade -->
+<div class="modal-overlay" id="modal-historico" style="display:none;">
+    <div class="modal-card modal-lg">
+        <div class="modal-header">
+            <h2>Histórico de Atividade</h2>
+            <button class="modal-close" onclick="fecharModal('modal-historico')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-row" style="margin-bottom: 24px;">
+                <div class="form-group" style="flex-direction: row; align-items: center; gap: 12px; width: 100%;">
+                    <input type="text" id="historico-os-input" placeholder="Digite o código da OS (Ex: 12345)" class="input-search" style="flex: 1;">
+                    <button class="btn btn-primary" id="btn-buscar-historico">Pesquisar</button>
+                </div>
+            </div>
+            
+            <div id="historico-content" style="display: none;">
+                <div style="background: var(--bg-tertiary); padding: 16px; border-radius: var(--radius-lg); margin-bottom: 24px;">
+                    <h3 id="hist-os-titulo" style="font-size: 18px; margin-bottom: 4px; color: var(--text-primary);"></h3>
+                    <p id="hist-os-cliente" style="font-size: 13px; color: var(--text-secondary);"></p>
+                </div>
+                <div id="hist-modulos-container">
+                    <!-- Preenchido pelo JS -->
+                </div>
+            </div>
+            
+            <div id="historico-empty" class="empty-state">
+                <div class="empty-state-icon">🔍</div>
+                <p>Pesquise por uma OS para ver a linha do tempo de todos os seus módulos.</p>
+            </div>
+            
+            <div id="historico-not-found" class="empty-state" style="display:none;">
+                <div class="empty-state-icon">❌</div>
+                <p>OS não encontrada. Verifique o código e tente novamente.</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-historico')">Fechar</button>
         </div>
     </div>
 </div>

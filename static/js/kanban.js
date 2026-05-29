@@ -748,3 +748,106 @@ function showToast(message, type = "success") {
     container.appendChild(toast);
     setTimeout(() => { toast.remove(); }, 4000);
 }
+
+// ─── Histórico de Atividade ──────────────────────────────────────────────────
+
+document.getElementById("btn-historico")?.addEventListener("click", () => {
+    document.getElementById("historico-os-input").value = "";
+    document.getElementById("historico-content").style.display = "none";
+    document.getElementById("historico-empty").style.display = "flex";
+    document.getElementById("historico-not-found").style.display = "none";
+    abrirModal("modal-historico");
+});
+
+document.getElementById("btn-buscar-historico")?.addEventListener("click", buscarHistorico);
+document.getElementById("historico-os-input")?.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") buscarHistorico();
+});
+
+async function buscarHistorico() {
+    const osCode = document.getElementById("historico-os-input").value.trim();
+    if (!osCode) return;
+
+    const btn = document.getElementById("btn-buscar-historico");
+    btn.disabled = true;
+    btn.textContent = "Buscando...";
+
+    try {
+        const res = await fetch(`/api/historico/${osCode}`);
+        if (!res.ok) {
+            document.getElementById("historico-content").style.display = "none";
+            document.getElementById("historico-empty").style.display = "none";
+            document.getElementById("historico-not-found").style.display = "flex";
+            return;
+        }
+
+        const data = await res.json();
+        
+        // Header da OS
+        document.getElementById("hist-os-titulo").textContent = `OS: ${data.os}`;
+        document.getElementById("hist-os-cliente").textContent = data.cliente ? `Cliente: ${data.cliente}` : "";
+        
+        const container = document.getElementById("hist-modulos-container");
+        container.innerHTML = "";
+
+        if (!data.modulos || data.modulos.length === 0) {
+            container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 20px;">Nenhum módulo encontrado para esta OS.</p>`;
+        } else {
+            data.modulos.forEach(mod => {
+                let html = `
+                    <div style="margin-bottom: 32px;">
+                        <h4 style="font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+                            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent);"></span>
+                            Módulo: ${mod.nome}
+                        </h4>
+                        <div class="timeline">
+                `;
+
+                if (mod.eventos.length === 0) {
+                    html += `<div class="empty-state" style="padding:16px;"><div class="empty-state-icon">📭</div>Nenhum histórico para este módulo.</div>`;
+                } else {
+                    mod.eventos.forEach(ev => {
+                        if (ev.tipo === "fase") {
+                            html += `
+                                <div class="timeline-item" style="--item-color: ${ev.fase_cor};">
+                                    <div class="timeline-fase"><i class="fa-solid fa-flag"></i> ${ev.fase_nome}</div>
+                                    <div class="timeline-meta">
+                                        <span><i class="fa-regular fa-clock"></i> Entrada: ${ev.data_str}</span>
+                                        <span><i class="fa-solid fa-user-tag"></i> Responsável: ${ev.responsavel}</span>
+                                        <span><i class="fa-solid fa-hourglass-half"></i> TMO: ${ev.tmo_dias} dia(s)</span>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (ev.tipo === "comentario") {
+                            html += `
+                                <div class="timeline-item" style="--item-color: var(--text-muted);">
+                                    <div class="timeline-fase" style="color: var(--text-primary);"><i class="fa-solid fa-comment-dots"></i> Comentário adicionado</div>
+                                    <div class="timeline-meta">
+                                        <span><i class="fa-regular fa-clock"></i> ${ev.data_str}</span>
+                                        <span><i class="fa-solid fa-user"></i> Autor: ${ev.autor}</span>
+                                        <div class="timeline-comment-text">${ev.texto}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+                }
+
+                html += `</div></div>`;
+                container.innerHTML += html;
+            });
+        }
+
+        document.getElementById("historico-empty").style.display = "none";
+        document.getElementById("historico-not-found").style.display = "none";
+        document.getElementById("historico-content").style.display = "block";
+
+    } catch (e) {
+        console.error("Erro ao buscar histórico:", e);
+        showToast("Erro ao buscar histórico", "error");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Pesquisar";
+    }
+}
+

@@ -822,6 +822,64 @@ def api_deletar_comentario(cid):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  API: Histórico Atividade
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/historico/<os_code>", methods=["GET"])
+@requer_perfil_api("admin", "gestor", "funcionario")
+def api_historico_atividade(os_code):
+    p = Projeto.query.filter_by(os=os_code).first()
+    if not p:
+        return jsonify({"erro": "OS não encontrada"}), 404
+        
+    resultado = {
+        "os": p.os,
+        "cliente": p.cliente or "",
+        "descricao": p.descricao or "",
+        "modulos": []
+    }
+    
+    for obj in p.objetos:
+        eventos = []
+        # Histórico de Fases
+        for of in obj.historico_fases:
+            eventos.append({
+                "tipo": "fase",
+                "data": of.data_entrada,
+                "data_str": of.data_entrada.strftime("%d/%m/%Y %H:%M"),
+                "fase_nome": of.fase.nome_fase if of.fase else "Desconhecida",
+                "fase_cor": of.fase.cor if of.fase else "#94a3b8",
+                "responsavel": of.responsavel_fase.nome if of.responsavel_fase else "Não Atribuído",
+                "tmo_dias": of.dias_na_fase()
+            })
+            
+        # Comentários
+        for c in Comentario.query.filter_by(objeto_id=obj.id).all():
+            eventos.append({
+                "tipo": "comentario",
+                "data": c.criado_em,
+                "data_str": c.criado_em.strftime("%d/%m/%Y %H:%M"),
+                "autor": c.usuario.nome if c.usuario else "Desconhecido",
+                "texto": c.texto
+            })
+            
+        # Ordenar do mais antigo para o mais novo
+        eventos.sort(key=lambda x: x["data"])
+        
+        # Formatar a data original para string ISO
+        for e in eventos:
+            e["data_iso"] = e["data"].isoformat()
+            del e["data"]
+            
+        resultado["modulos"].append({
+            "id": obj.id,
+            "nome": obj.nome,
+            "eventos": eventos
+        })
+        
+    return jsonify(resultado)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  SEED: Criar admin padrão se não existir
 # ═══════════════════════════════════════════════════════════════════════════════
 
