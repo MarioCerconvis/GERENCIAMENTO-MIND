@@ -119,13 +119,13 @@ function createCard(projeto) {
         
         // SLA de Fase Visual
         if (sf.dias_restantes > 2) {
-            card.style.backgroundColor = "rgba(144, 238, 144, 0.5)"; // verde claro transparente
+            card.style.backgroundColor = "rgba(144, 238, 144, 0.2)"; // verde claro mais transparente
         } else if (sf.dias_restantes === 2) {
-            card.style.backgroundColor = "rgba(255, 255, 0, 0.5)"; // amarelo transparente
+            card.style.backgroundColor = "rgba(255, 255, 0, 0.2)"; // amarelo mais transparente
         } else if (sf.dias_restantes === 1 || sf.dias_restantes === 0) {
-            card.style.backgroundColor = "rgba(255, 165, 0, 0.5)"; // laranja transparente
+            card.style.backgroundColor = "rgba(255, 165, 0, 0.2)"; // laranja mais transparente
         } else if (sf.dias_restantes < 0) {
-            card.style.backgroundColor = "rgba(255, 0, 0, 0.3)"; // vermelho transparente
+            card.style.backgroundColor = "rgba(255, 0, 0, 0.15)"; // vermelho mais transparente
         }
     }
 
