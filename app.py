@@ -467,13 +467,17 @@ def api_criar_projeto():
         # Se não enviou nome, usa nome padrão
         nome_obj = obj_data.get("nome", "").strip() or "Módulo 1"
 
+        etapas = obj_data.get("etapas_pre_definidas")
+        etapas_str = ",".join(map(str, etapas)) if isinstance(etapas, list) else None
+
         novo_obj = Objeto(
             projeto_id=novo_proj.projeto_id,
             nome=nome_obj,
             descricao=obj_data.get("descricao", ""),
             data_limite=obj_data_limite,
             responsavel_id=obj_data.get("responsavel_id", novo_proj.responsavel_id),
-            fase_atual_id=fase_id
+            fase_atual_id=fase_id,
+            etapas_pre_definidas=etapas_str
         )
         db.session.add(novo_obj)
         db.session.flush()
@@ -539,6 +543,9 @@ def api_editar_objeto(oid):
         o.data_limite = date.fromisoformat(body["data_limite"])
     if "responsavel_id" in body:
         o.responsavel_id = body["responsavel_id"]
+    if "etapas_pre_definidas" in body:
+        etapas = body["etapas_pre_definidas"]
+        o.etapas_pre_definidas = ",".join(map(str, etapas)) if isinstance(etapas, list) else None
     db.session.commit()
     return jsonify(o.to_dict())
 
@@ -561,13 +568,17 @@ def api_criar_objeto(pid):
     data_limite = date.fromisoformat(data_limite_str) if data_limite_str else p.data_limite
     responsavel_id = body.get("responsavel_id", p.responsavel_id)
 
+    etapas = body.get("etapas_pre_definidas")
+    etapas_str = ",".join(map(str, etapas)) if isinstance(etapas, list) else None
+
     novo_obj = Objeto(
         projeto_id=pid,
         nome=nome,
         descricao=body.get("descricao", ""),
         data_limite=data_limite,
         responsavel_id=responsavel_id,
-        fase_atual_id=fase_id
+        fase_atual_id=fase_id,
+        etapas_pre_definidas=etapas_str
     )
     db.session.add(novo_obj)
     db.session.flush()
@@ -635,6 +646,60 @@ def api_mover_fase(oid):
     o.fase_atual_id = nova_fase_id
     if body.get("responsavel_fase_id"):
         o.responsavel_id = body["responsavel_fase_id"]
+    db.session.commit()
+    
+    # Notificar equipe da nova fase
+    if of.funcionarios:
+        notificar_mudanca_fase(o.projeto, o, nova_fase, of.funcionarios)
+    return jsonify(o.to_dict())
+
+
+@app.route("/api/objetos/<int:oid>/concluir-fase", methods=["POST"])
+@requer_perfil_api("admin", "gestor", "funcionario")
+def api_concluir_fase(oid):
+    o = Objeto.query.get_or_404(oid)
+    if not o.etapas_pre_definidas:
+        return jsonify({"erro": "Este módulo não possui um fluxo de etapas pré-definido."}), 400
+    
+    etapas = [int(e.strip()) for e in o.etapas_pre_definidas.split(",") if e.strip()]
+    if not etapas:
+        return jsonify({"erro": "Fluxo de etapas pré-definido está vazio."}), 400
+
+    fase_atual = o.fase_atual_id
+    proxima_fase_id = None
+    
+    if fase_atual is None:
+        # Se estiver sem fase, move para a primeira da lista
+        proxima_fase_id = etapas[0]
+    else:
+        try:
+            idx = etapas.index(fase_atual)
+            if idx + 1 < len(etapas):
+                proxima_fase_id = etapas[idx + 1]
+            else:
+                return jsonify({"erro": "Esta já é a última fase do fluxo pré-definido."}), 400
+        except ValueError:
+            # Fase atual não está na lista. Inicia o fluxo pré-definido a partir da primeira.
+            proxima_fase_id = etapas[0]
+            
+    nova_fase = Fase.query.get_or_404(proxima_fase_id)
+    if nova_fase.ativa == False:
+        return jsonify({"erro": "A próxima fase do fluxo está desativada."}), 400
+
+    # Fechar fase atual
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+    if fase_ativa:
+        fase_ativa.data_saida = datetime.utcnow()
+        
+    # Abrir nova fase
+    of = ObjetoFase(
+        objeto_id=oid,
+        id_fase=proxima_fase_id,
+        responsavel_fase_id=o.responsavel_id,
+        data_limite=o.data_limite  # Mantemos o limite do objeto por simplicidade
+    )
+    db.session.add(of)
+    o.fase_atual_id = proxima_fase_id
     db.session.commit()
     
     # Notificar equipe da nova fase

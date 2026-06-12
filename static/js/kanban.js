@@ -129,6 +129,17 @@ function createCard(projeto) {
         }
     }
 
+    let hasProximaEtapa = false;
+    if (projeto.etapas_pre_definidas) {
+        const etapasStr = String(projeto.etapas_pre_definidas).split(",").filter(e => e);
+        const currentIndex = etapasStr.indexOf(String(projeto.fase_atual_id));
+        if (currentIndex !== -1 && currentIndex + 1 < etapasStr.length) {
+            hasProximaEtapa = true;
+        } else if (currentIndex === -1 && etapasStr.length > 0) {
+            hasProximaEtapa = true;
+        }
+    }
+
     card.innerHTML = `
         <div class="card-os">${projeto.projeto_os} <span style="font-size:0.8em; color:#64748b; font-weight:normal;">- ${projeto.nome}</span></div>
         <div class="card-cliente">${projeto.cliente || "—"}</div>
@@ -138,6 +149,11 @@ function createCard(projeto) {
             <span class="card-days">${diasFase}</span>
         </div>
         ${projeto.responsavel_nome ? `<div class="card-responsavel">👤 ${projeto.responsavel_nome}</div>` : ""}
+        ${hasProximaEtapa ? `
+            <div style="margin-top: 8px;">
+                <button class="btn btn-primary btn-sm" onclick="concluirFasePreDefinida(event, ${projeto.id})" style="width: 100%; background-color: #22c55e; border-color: #22c55e; color: white;">✔ Concluído</button>
+            </div>
+        ` : ""}
     `;
 
     // Click to open detail
@@ -151,6 +167,24 @@ function createCard(projeto) {
     card.addEventListener("dragend", handleDragEnd);
 
     return card;
+}
+
+// ─── Concluir Fase Pré-Definida ──────────────────────────────────────────────
+async function concluirFasePreDefinida(event, projetoId) {
+    event.stopPropagation();
+    if (!confirm("Confirmar a conclusão desta etapa e mover para a próxima do fluxo pré-definido?")) return;
+    
+    const res = await fetch(`/api/objetos/${projetoId}/concluir-fase`, {
+        method: "POST"
+    });
+
+    if (res.ok) {
+        showToast("Fase concluída e movida com sucesso!", "success");
+        await loadBoard();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao concluir fase", "error");
+    }
 }
 
 // ─── Drag & Drop ─────────────────────────────────────────────────────────────
@@ -295,6 +329,17 @@ function adicionarModuloUI(dadosModulo = null) {
     const responsavelOptions = allFuncionarios.map(f => `<option value="${f.id}" ${dadosModulo && dadosModulo.responsavel_id === f.id ? 'selected' : ''}>${f.nome}</option>`).join("");
     const faseOptions = allFases.map(f => `<option value="${f.id}" ${dadosModulo && dadosModulo.fase_atual_id === f.id ? 'selected' : ''}>${f.nome}</option>`).join("");
     
+    // Preparar UI do fluxo de fases se estiver editando
+    let fluxoHtml = "";
+    if (dadosModulo && dadosModulo.etapas_pre_definidas) {
+        const etapas = String(dadosModulo.etapas_pre_definidas).split(",");
+        etapas.forEach(val => {
+            if (!val.trim()) return;
+            const selOpts = allFases.map(f => `<option value="${f.id}" ${f.id == val ? 'selected' : ''}>${f.nome}</option>`).join("");
+            fluxoHtml += `<select class="input-select mod-etapa-step" style="width:auto; margin-bottom:4px;"><option value="">--</option>${selOpts}</select>`;
+        });
+    }
+
     const modHtml = `
         <div class="modulo-item" id="modulo-${moduloCount}" style="border: 1px solid #e2e8f0; padding: 12px; margin-bottom: 12px; border-radius: 6px; background: #f8fafc;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -330,6 +375,14 @@ function adicionarModuloUI(dadosModulo = null) {
                 </div>
             </div>
             
+            <div class="form-group" style="grid-column: 1 / -1;">
+                <label>Fluxo de Fases Pré-Definidas (Opcional, em ordem)</label>
+                <div class="mod-fluxo-container" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    ${fluxoHtml}
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="addFluxoStep(this)">+ Adicionar Passo do Fluxo</button>
+            </div>
+            
             <div class="form-group">
                 <label>Descrição do Módulo</label>
                 <textarea class="mod-descricao" rows="1">${dadosModulo ? dadosModulo.descricao : ''}</textarea>
@@ -337,6 +390,17 @@ function adicionarModuloUI(dadosModulo = null) {
         </div>
     `;
     container.insertAdjacentHTML('beforeend', modHtml);
+}
+
+window.addFluxoStep = function(btn) {
+    const container = btn.previousElementSibling;
+    const faseOptions = allFases.map(f => `<option value="${f.id}">${f.nome}</option>`).join("");
+    const sel = document.createElement("select");
+    sel.className = "input-select mod-etapa-step";
+    sel.style.width = "auto";
+    sel.style.marginBottom = "4px";
+    sel.innerHTML = `<option value="">--</option>${faseOptions}`;
+    container.appendChild(sel);
 }
 
 function removerModuloUI(id) {
@@ -395,13 +459,15 @@ async function saveProject() {
             const modData = mod.querySelector(".mod-data").value;
             const modResp = mod.querySelector(".mod-responsavel").value;
             const modDesc = mod.querySelector(".mod-descricao").value;
+            const modEtapas = Array.from(mod.querySelectorAll(".mod-etapa-step")).map(s => s.value).filter(v => v);
             
             data.objetos.push({
                 nome: modNome,
                 fase_id: modFase ? parseInt(modFase) : null,
                 data_limite: modData || null,
                 responsavel_id: modResp ? parseInt(modResp) : null,
-                descricao: modDesc
+                descricao: modDesc,
+                etapas_pre_definidas: modEtapas.length > 0 ? modEtapas.map(Number) : null
             });
         });
         

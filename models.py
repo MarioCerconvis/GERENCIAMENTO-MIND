@@ -200,6 +200,7 @@ class Objeto(db.Model):
     data_limite = db.Column(db.Date, nullable=False) # SLA do objeto
     responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
     fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
+    etapas_pre_definidas = db.Column(db.String(255), nullable=True)  # Sequência de IDs de fases (ex: "1,4,5")
 
     # Relacionamentos
     fase_atual = db.relationship("Fase", foreign_keys=[fase_atual_id])
@@ -257,6 +258,7 @@ class Objeto(db.Model):
                 "dias_na_fase": self.dias_na_fase_atual(),
             },
             "sla_fase": sla_fase,
+            "etapas_pre_definidas": self.etapas_pre_definidas,
         }
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]
