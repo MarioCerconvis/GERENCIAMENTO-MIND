@@ -228,6 +228,60 @@ class Objeto(db.Model):
             return 0
         return (datetime.utcnow() - fase_ativa.data_entrada).days
 
+    def calcular_indice_fase_atual(self):
+        if not self.etapas_pre_definidas:
+            return -1
+        
+        etapas = [int(e.strip()) for e in self.etapas_pre_definidas.split(",") if e.strip()]
+        if not etapas:
+            return -1
+            
+        fase_atual = self.fase_atual_id
+        if fase_atual not in etapas:
+            return -1
+            
+        indices = [i for i, x in enumerate(etapas) if x == fase_atual]
+        if len(indices) == 1:
+            return indices[0]
+            
+        # Desambiguar usando histórico (do mais antigo pro mais novo)
+        historico = self.historico_fases.all()  # order_by default is desc()
+        fases_visitadas = [of.id_fase for of in reversed(historico)]
+        
+        if not fases_visitadas or fases_visitadas[-1] != fase_atual:
+            fases_visitadas.append(fase_atual)
+            
+        best_idx = indices[0]
+        max_match = -1
+        
+        for i in indices:
+            match_len = 0
+            h_idx = len(fases_visitadas) - 1
+            e_idx = i
+            while h_idx >= 0 and e_idx >= 0 and fases_visitadas[h_idx] == etapas[e_idx]:
+                match_len += 1
+                h_idx -= 1
+                e_idx -= 1
+            if match_len > max_match:
+                max_match = match_len
+                best_idx = i
+                
+        return best_idx
+
+    def has_proxima_etapa(self):
+        if not self.etapas_pre_definidas:
+            return False
+        
+        etapas = [int(e.strip()) for e in self.etapas_pre_definidas.split(",") if e.strip()]
+        if not etapas:
+            return False
+            
+        idx = self.calcular_indice_fase_atual()
+        if idx == -1:
+            return True # se tem fluxo mas a fase não tá nele, ele pode entrar na primeira fase
+            
+        return idx + 1 < len(etapas)
+
     def to_dict(self, include_historico=False):
         fase_ativa = ObjetoFase.query.filter_by(objeto_id=self.id, data_saida=None).first()
         sla_fase = None
@@ -259,6 +313,7 @@ class Objeto(db.Model):
             },
             "sla_fase": sla_fase,
             "etapas_pre_definidas": self.etapas_pre_definidas,
+            "has_proxima_etapa": self.has_proxima_etapa(),
         }
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]

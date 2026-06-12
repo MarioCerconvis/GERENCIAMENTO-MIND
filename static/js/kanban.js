@@ -129,16 +129,7 @@ function createCard(projeto) {
         }
     }
 
-    let hasProximaEtapa = false;
-    if (projeto.etapas_pre_definidas) {
-        const etapasStr = String(projeto.etapas_pre_definidas).split(",").filter(e => e);
-        const currentIndex = etapasStr.indexOf(String(projeto.fase_atual_id));
-        if (currentIndex !== -1 && currentIndex + 1 < etapasStr.length) {
-            hasProximaEtapa = true;
-        } else if (currentIndex === -1 && etapasStr.length > 0) {
-            hasProximaEtapa = true;
-        }
-    }
+    let hasProximaEtapa = projeto.has_proxima_etapa;
 
     card.innerHTML = `
         <div class="card-os">${projeto.projeto_os} <span style="font-size:0.8em; color:#64748b; font-weight:normal;">- ${projeto.nome}</span></div>
@@ -830,6 +821,30 @@ document.getElementById("historico-os-input")?.addEventListener("keypress", (e) 
     if (e.key === "Enter") buscarHistorico();
 });
 
+document.getElementById("toggle-fases-futuras")?.addEventListener("change", (e) => {
+    const container = document.getElementById("hist-modulos-container");
+    if (e.target.checked) {
+        container.classList.remove("hide-futures");
+    } else {
+        container.classList.add("hide-futures");
+    }
+});
+
+// Injetar CSS para as fases futuras
+const style = document.createElement("style");
+style.textContent = `
+    .hide-futures .timeline-item-future { display: none !important; }
+    .timeline-item-future {
+        opacity: 0.6;
+        border: 2px dashed var(--item-color);
+        background: transparent !important;
+    }
+    .timeline-item-future .timeline-meta span {
+        color: var(--text-muted);
+    }
+`;
+document.head.appendChild(style);
+
 async function buscarHistorico() {
     const osCode = document.getElementById("historico-os-input").value.trim();
     if (!osCode) return;
@@ -881,6 +896,16 @@ async function buscarHistorico() {
                                         <span><i class="fa-regular fa-clock"></i> Entrada: ${ev.data_str}</span>
                                         <span><i class="fa-solid fa-user-tag"></i> Responsável: ${ev.responsavel}</span>
                                         <span><i class="fa-solid fa-hourglass-half"></i> TMO: ${ev.tmo_dias} dia(s)</span>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (ev.tipo === "fase_futura") {
+                            html += `
+                                <div class="timeline-item timeline-item-future" style="--item-color: ${ev.fase_cor};">
+                                    <div class="timeline-fase"><i class="fa-solid fa-hourglass-start"></i> ${ev.fase_nome} (Pendente)</div>
+                                    <div class="timeline-meta">
+                                        <span><i class="fa-regular fa-clock"></i> Previsto</span>
+                                        <span><i class="fa-solid fa-user-tag"></i> A definir</span>
                                     </div>
                                 </div>
                             `;

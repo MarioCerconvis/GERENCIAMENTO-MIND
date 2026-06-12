@@ -197,6 +197,10 @@
                     <input type="text" id="historico-os-input" placeholder="Digite o código da OS (Ex: 1234-56)" class="input-search" style="flex: 1;">
                     <button class="btn btn-primary" id="btn-buscar-historico">Pesquisar</button>
                 </div>
+                <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="toggle-fases-futuras" checked>
+                    <label for="toggle-fases-futuras" style="font-size: 13px; color: var(--text-secondary); cursor: pointer; margin: 0;">Exibir fases futuras esperadas</label>
+                </div>
             </div>
             
             <div id="historico-content" style="display: none;">
@@ -226,5 +230,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/kanban.js"></script>
+<script src="/static/js/kanban.js?v=3"></script>
 {% endblock %}

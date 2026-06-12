@@ -672,13 +672,13 @@ def api_concluir_fase(oid):
         # Se estiver sem fase, move para a primeira da lista
         proxima_fase_id = etapas[0]
     else:
-        try:
-            idx = etapas.index(fase_atual)
+        idx = o.calcular_indice_fase_atual()
+        if idx != -1:
             if idx + 1 < len(etapas):
                 proxima_fase_id = etapas[idx + 1]
             else:
                 return jsonify({"erro": "Esta já é a última fase do fluxo pré-definido."}), 400
-        except ValueError:
+        else:
             # Fase atual não está na lista. Inicia o fluxo pré-definido a partir da primeira.
             proxima_fase_id = etapas[0]
             
@@ -935,6 +935,29 @@ def api_historico_atividade(os_code):
         for e in eventos:
             e["data_iso"] = e["data"].isoformat()
             del e["data"]
+            
+        # Adicionar fases futuras esperadas (se houver fluxo pré-definido)
+        if obj.etapas_pre_definidas:
+            etapas = [int(e.strip()) for e in obj.etapas_pre_definidas.split(",") if e.strip()]
+            fases_futuras = []
+            idx = obj.calcular_indice_fase_atual()
+            if idx != -1:
+                fases_futuras = etapas[idx+1:]
+            else:
+                fases_futuras = etapas
+                
+            for fase_id in fases_futuras:
+                f = Fase.query.get(fase_id)
+                if f:
+                    eventos.append({
+                        "tipo": "fase_futura",
+                        "data_str": "Pendente",
+                        "fase_nome": f.nome_fase,
+                        "fase_cor": f.cor,
+                        "responsavel": "—",
+                        "tmo_dias": 0,
+                        "data_iso": None
+                    })
             
         resultado["modulos"].append({
             "id": obj.id,
