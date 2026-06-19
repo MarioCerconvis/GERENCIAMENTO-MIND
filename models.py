@@ -202,6 +202,7 @@ class Objeto(db.Model):
     fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
     etapas_pre_definidas = db.Column(db.String(255), nullable=True)  # Sequência de IDs de fases (ex: "1,4,5")
     prioridade = db.Column(db.Integer, default=0)  # 0: sem flag, 1: Importante, 2: Prioridade, 3: Urgente
+    ordem_kanban = db.Column(db.Integer, default=0)
 
     # Relacionamentos
     fase_atual = db.relationship("Fase", foreign_keys=[fase_atual_id])
@@ -308,6 +309,7 @@ class Objeto(db.Model):
             "fase_atual_nome": self.fase_atual.nome_fase if self.fase_atual else "",
             "fase_atual_cor": self.fase_atual.cor if self.fase_atual else "#94a3b8",
             "prioridade": self.prioridade,
+            "ordem_kanban": self.ordem_kanban,
             "sla": {
                 "flag": self.sla_flag(),
                 "dias_restantes": self.dias_restantes_sla(),

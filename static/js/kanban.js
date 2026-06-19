@@ -78,7 +78,12 @@ function renderBoard(data) {
 
         const body = column.querySelector(".column-body");
 
-        col.objetos.sort((a, b) => (b.prioridade || 0) - (a.prioridade || 0));
+        col.objetos.sort((a, b) => {
+            if ((b.prioridade || 0) !== (a.prioridade || 0)) {
+                return (b.prioridade || 0) - (a.prioridade || 0);
+            }
+            return (a.ordem_kanban || 0) - (b.ordem_kanban || 0);
+        });
 
         if (col.objetos.length === 0) {
             body.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div>Nenhum card</div>`;
@@ -202,10 +207,33 @@ function handleDragEnd(e) {
     document.querySelectorAll(".column-body").forEach(b => b.classList.remove("drag-over"));
 }
 
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.project-card:not(.dragging)')];
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
 function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     e.currentTarget.classList.add("drag-over");
+    
+    const afterElement = getDragAfterElement(e.currentTarget, e.clientY);
+    const draggable = document.querySelector('.dragging');
+    if (draggable) {
+        if (afterElement == null) {
+            e.currentTarget.appendChild(draggable);
+        } else {
+            e.currentTarget.insertBefore(draggable, afterElement);
+        }
+    }
 }
 
 function handleDragLeave(e) {
@@ -217,12 +245,44 @@ let pendingMove = null;
 async function handleDrop(e) {
     e.preventDefault();
     e.currentTarget.classList.remove("drag-over");
-    const faseId = e.currentTarget.dataset.faseId;
-    if (!draggedObjetoId || faseId === "sem_fase") return;
+    const newFaseId = e.currentTarget.dataset.faseId;
+    if (!draggedObjetoId || newFaseId === "sem_fase") return;
 
-    pendingMove = { projetoId: draggedObjetoId, faseId: parseInt(faseId), isInline: false };
-    document.getElementById("mover-data-limite").value = "";
-    abrirModal("modal-mover-fase");
+    let oldFaseId = null;
+    boardData.forEach(col => {
+        if (col.objetos.find(o => o.id == draggedObjetoId)) {
+            oldFaseId = col.id ? col.id.toString() : "sem_fase";
+        }
+    });
+
+    if (newFaseId !== oldFaseId) {
+        // Phase changed
+        pendingMove = { projetoId: draggedObjetoId, faseId: parseInt(newFaseId), isInline: false };
+        document.getElementById("mover-data-limite").value = "";
+        abrirModal("modal-mover-fase");
+    } else {
+        // Reordering in the same phase
+        if (currentUser?.perfil !== "admin") {
+            showToast("Apenas administradores podem reordenar cards na mesma fase.", "error");
+            await loadBoard();
+        } else {
+            const cards = [...e.currentTarget.querySelectorAll('.project-card')];
+            const ordemIds = cards.map(c => parseInt(c.dataset.objetoId));
+            
+            const res = await fetch('/api/fases/reordenar-objetos', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ordem: ordemIds }),
+            });
+            
+            if (res.ok) {
+                await loadBoard();
+            } else {
+                showToast("Erro ao reordenar", "error");
+                await loadBoard();
+            }
+        }
+    }
     draggedObjetoId = null;
 }
 

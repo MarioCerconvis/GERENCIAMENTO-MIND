@@ -406,6 +406,19 @@ def api_reordenar_fases():
     return jsonify({"ok": True})
 
 
+@app.route("/api/fases/reordenar-objetos", methods=["POST"])
+@requer_perfil_api("admin")
+def api_reordenar_objetos():
+    body = request.get_json()
+    ordem = body.get("ordem", [])  # [objeto_id, objeto_id, ...]
+    for i, oid in enumerate(ordem):
+        o = db.session.get(Objeto, oid)
+        if o:
+            o.ordem_kanban = i
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  API: PROJETOS & OBJETOS
 # ═══════════════════════════════════════════════════════════════════════════════
