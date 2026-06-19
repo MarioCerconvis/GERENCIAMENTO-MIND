@@ -78,6 +78,8 @@ function renderBoard(data) {
 
         const body = column.querySelector(".column-body");
 
+        col.objetos.sort((a, b) => (b.prioridade || 0) - (a.prioridade || 0));
+
         if (col.objetos.length === 0) {
             body.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div>Nenhum card</div>`;
         } else {
@@ -131,9 +133,16 @@ function createCard(projeto) {
 
     let hasProximaEtapa = projeto.has_proxima_etapa;
 
+    let priorityBadge = "";
+    if (projeto.prioridade === 3) priorityBadge = '<span class="priority-badge priority-3">🔴 Urgente</span>';
+    else if (projeto.prioridade === 2) priorityBadge = '<span class="priority-badge priority-2">🟠 Prioridade</span>';
+    else if (projeto.prioridade === 1) priorityBadge = '<span class="priority-badge priority-1">🟡 Importante</span>';
+
     card.innerHTML = `
         <div class="card-os">${projeto.projeto_os} <span style="font-size:0.8em; color:#64748b; font-weight:normal;">- ${projeto.nome}</span></div>
         <div class="card-cliente">${projeto.cliente || "—"}</div>
+        
+        ${priorityBadge ? `<div style="margin-bottom: 6px;">${priorityBadge}</div>` : ""}
         
         <div class="card-footer">
             <span class="sla-badge ${slaClass}">${slaIcon} ${slaDias}</span>
@@ -552,6 +561,30 @@ async function openDetail(objetoId) {
         </div>
     `;
 
+    // ── Prioridade ──
+    const prioNomes = { 0: "Sem flag", 1: "Importante", 2: "Prioridade", 3: "Urgente" };
+    if (currentUser?.perfil === "admin") {
+        html += `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);">
+                <span class="detail-label" style="margin:0;white-space:nowrap;">Prioridade:</span>
+                <select id="detalhe-prioridade" class="input-select" style="flex:1;">
+                    <option value="0" ${p.prioridade === 0 ? "selected" : ""}>Sem flag</option>
+                    <option value="1" ${p.prioridade === 1 ? "selected" : ""}>🟡 Importante</option>
+                    <option value="2" ${p.prioridade === 2 ? "selected" : ""}>🟠 Prioridade</option>
+                    <option value="3" ${p.prioridade === 3 ? "selected" : ""}>🔴 Urgente</option>
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="mudarPrioridade(${p.id})">Salvar</button>
+            </div>
+        `;
+    } else if (p.prioridade > 0) {
+        html += `
+            <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);">
+                <span class="detail-label" style="margin-right:8px;">Prioridade:</span>
+                <span class="priority-badge priority-${p.prioridade}">${prioNomes[p.prioridade]}</span>
+            </div>
+        `;
+    }
+
     // ── Mover fase inline (para admin/gestor) ──
     if (["admin", "gestor"].includes(currentUser?.perfil)) {
         const faseOptions = allFases.map(f => {
@@ -656,6 +689,24 @@ async function openDetail(objetoId) {
 
     document.getElementById("detalhe-body").innerHTML = html;
     abrirModal("modal-detalhe");
+}
+
+// ─── Alterar Prioridade ──────────────────────────────────────────────────────
+
+async function mudarPrioridade(projetoId) {
+    const prioridade = document.getElementById("detalhe-prioridade").value;
+    const res = await fetch(`/api/objetos/${projetoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prioridade: parseInt(prioridade) })
+    });
+    if (res.ok) {
+        showToast("Prioridade atualizada!", "success");
+        await loadBoard();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao atualizar prioridade", "error");
+    }
 }
 
 // ─── Mover fase pelo detalhe ─────────────────────────────────────────────────

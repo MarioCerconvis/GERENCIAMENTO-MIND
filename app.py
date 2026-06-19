@@ -546,6 +546,11 @@ def api_editar_objeto(oid):
     if "etapas_pre_definidas" in body:
         etapas = body["etapas_pre_definidas"]
         o.etapas_pre_definidas = ",".join(map(str, etapas)) if isinstance(etapas, list) else None
+        
+    u = get_usuario_logado()
+    if "prioridade" in body and u and u.perfil == "admin":
+        o.prioridade = int(body["prioridade"])
+        
     db.session.commit()
     return jsonify(o.to_dict())
 
