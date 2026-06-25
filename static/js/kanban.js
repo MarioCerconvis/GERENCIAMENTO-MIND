@@ -36,6 +36,7 @@ async function loadBoard() {
     if (!res.ok) return;
     boardData = await res.json();
     renderBoard(boardData);
+    populateFuncionarioFilter(boardData);
 }
 
 async function loadSelectData() {
@@ -108,6 +109,10 @@ function createCard(projeto) {
     const card = document.createElement("div");
     card.className = "project-card";
     card.dataset.objetoId = projeto.id;
+    card.dataset.prioridade = projeto.prioridade ?? 0;
+    // Phase-level funcionários for filtering
+    const funcsFase = (projeto.funcionarios_fase_atual || []).map(f => f.nome);
+    card.dataset.funcionariosFase = funcsFase.join(",");
     card.draggable = ["admin", "gestor"].includes(currentUser?.perfil);
 
     const sla = projeto.sla || {};
@@ -145,6 +150,7 @@ function createCard(projeto) {
 
     card.innerHTML = `
         <div class="card-os">${projeto.projeto_os} <span style="font-size:0.8em; color:#64748b; font-weight:normal;">- ${projeto.nome}</span></div>
+        <div class="card-cliente" style="font-size:0.85em; font-weight:bold; margin-bottom: 2px;">${projeto.projeto_nome || ""}</div>
         <div class="card-cliente">${projeto.cliente || "—"}</div>
         
         ${priorityBadge ? `<div style="margin-bottom: 6px;">${priorityBadge}</div>` : ""}
@@ -153,7 +159,9 @@ function createCard(projeto) {
             <span class="sla-badge ${slaClass}">${slaIcon} ${slaDias}</span>
             <span class="card-days">${diasFase}</span>
         </div>
-        ${projeto.responsavel_nome ? `<div class="card-responsavel">👤 ${projeto.responsavel_nome}</div>` : ""}
+        ${funcsFase.length > 0
+            ? `<div class="card-responsavel">👤 ${funcsFase.join(", ")}</div>`
+            : (projeto.responsavel_nome ? `<div class="card-responsavel">👤 ${projeto.responsavel_nome}</div>` : "")}
         ${hasProximaEtapa ? `
             <div style="margin-top: 8px;">
                 <button class="btn btn-primary btn-sm" onclick="concluirFasePreDefinida(event, ${projeto.id})" style="width: 100%; background-color: #22c55e; border-color: #22c55e; color: white;">✔ Concluído</button>
@@ -328,11 +336,19 @@ function setupToolbar() {
     document.getElementById("kanban-filter-sla").addEventListener("change", () => {
         filterBoard();
     });
+    document.getElementById("kanban-filter-funcionario").addEventListener("change", () => {
+        filterBoard();
+    });
+    document.getElementById("kanban-filter-prioridade").addEventListener("change", () => {
+        filterBoard();
+    });
 }
 
 function filterBoard() {
     const query = document.getElementById("kanban-search").value.toLowerCase();
     const slaFilter = document.getElementById("kanban-filter-sla").value;
+    const funcFilter = document.getElementById("kanban-filter-funcionario").value;
+    const prioFilter = document.getElementById("kanban-filter-prioridade").value;
     const cards = document.querySelectorAll(".project-card");
 
     cards.forEach(card => {
@@ -346,7 +362,51 @@ function filterBoard() {
             if (slaFilter === "fora") matchSla = badge?.classList.contains("sla-fora");
         }
 
-        card.style.display = (matchQuery && matchSla) ? "" : "none";
+        let matchFunc = true;
+        if (funcFilter) {
+            const funcionariosFase = card.dataset.funcionariosFase || "";
+            matchFunc = funcionariosFase.split(",").includes(funcFilter);
+        }
+
+        let matchPrio = true;
+        if (prioFilter !== "") {
+            matchPrio = card.dataset.prioridade === prioFilter;
+        }
+
+        card.style.display = (matchQuery && matchSla && matchFunc && matchPrio) ? "" : "none";
+    });
+
+    updateColumnCounts();
+}
+
+function populateFuncionarioFilter(data) {
+    const select = document.getElementById("kanban-filter-funcionario");
+    const currentValue = select.value;
+    const names = new Set();
+    data.forEach(col => {
+        (col.objetos || []).forEach(obj => {
+            (obj.funcionarios_fase_atual || []).forEach(f => {
+                if (f.nome) names.add(f.nome);
+            });
+        });
+    });
+    select.innerHTML = '<option value="">Todos os Funcionários</option>';
+    [...names].sort((a, b) => a.localeCompare(b, 'pt-BR')).forEach(name => {
+        select.innerHTML += `<option value="${name}">${name}</option>`;
+    });
+    // Restore previous selection if still available
+    if (currentValue && names.has(currentValue)) {
+        select.value = currentValue;
+    }
+}
+
+function updateColumnCounts() {
+    document.querySelectorAll(".kanban-column").forEach(col => {
+        const body = col.querySelector(".column-body");
+        const countBadge = col.querySelector(".column-count");
+        if (!body || !countBadge) return;
+        const visibleCards = body.querySelectorAll(".project-card:not([style*='display: none'])").length;
+        countBadge.textContent = visibleCards;
     });
 }
 
@@ -473,6 +533,7 @@ async function openNewProject() {
     document.getElementById("modal-projeto-titulo").textContent = "Novo Projeto (OS)";
     document.getElementById("proj-id").value = "";
     document.getElementById("proj-os").value = "";
+    document.getElementById("proj-nome").value = "";
     document.getElementById("proj-cliente").value = "";
     document.getElementById("proj-solicitante").value = "";
     document.getElementById("proj-data-limite").value = "";
@@ -501,6 +562,7 @@ async function saveProject() {
     // Obter dados da OS
     const data = {
         os: document.getElementById("proj-os").value,
+        nome: document.getElementById("proj-nome").value,
         cliente: document.getElementById("proj-cliente").value,
         solicitante: document.getElementById("proj-solicitante").value,
         data_limite: document.getElementById("proj-data-limite").value,
@@ -602,7 +664,8 @@ async function openDetail(objetoId) {
     if (!res.ok) return;
     const p = await res.json();
 
-    document.getElementById("detalhe-titulo").textContent = `${p.projeto_os} - ${p.nome}`;
+    document.getElementById("detalhe-titulo").textContent = `${p.projeto_os} - ${p.projeto_nome || ""}`;
+    document.getElementById("detalhe-subtitulo").textContent = `Módulo: ${p.nome}`;
 
     const sla = p.sla || {};
     const slaClass = sla.flag === "Dentro do SLA" ? "dentro" : "fora";
@@ -815,6 +878,7 @@ async function openEditProject(osId) {
     document.getElementById("modal-projeto-titulo").textContent = "Editar OS";
     document.getElementById("proj-id").value = p.id;
     document.getElementById("proj-os").value = p.os;
+    document.getElementById("proj-nome").value = p.nome || "";
     document.getElementById("proj-cliente").value = p.cliente;
     document.getElementById("proj-solicitante").value = p.solicitante;
     document.getElementById("proj-data-limite").value = p.data_limite;

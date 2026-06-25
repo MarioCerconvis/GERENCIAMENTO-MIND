@@ -140,6 +140,7 @@ class Projeto(db.Model):
     __tablename__ = "projetos"
     projeto_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     os = db.Column(db.String(50), unique=True, nullable=False)  # Ordem de Serviço
+    nome = db.Column(db.String(200), nullable=True) # Nome do projeto
     cliente = db.Column(db.String(150), nullable=True)
     solicitante = db.Column(db.String(150), nullable=True)
     descricao = db.Column(db.Text, nullable=True)
@@ -168,6 +169,7 @@ class Projeto(db.Model):
         d = {
             "id": self.projeto_id,
             "os": self.os,
+            "nome": self.nome or "",
             "cliente": self.cliente or "",
             "solicitante": self.solicitante or "",
             "descricao": self.descricao or "",
@@ -299,6 +301,7 @@ class Objeto(db.Model):
             "id": self.id,
             "projeto_id": self.projeto_id,
             "projeto_os": self.projeto.os if self.projeto else "",
+            "projeto_nome": self.projeto.nome if self.projeto else "",
             "cliente": self.projeto.cliente if self.projeto else "",
             "nome": self.nome,
             "descricao": self.descricao or "",
@@ -318,6 +321,10 @@ class Objeto(db.Model):
             "sla_fase": sla_fase,
             "etapas_pre_definidas": self.etapas_pre_definidas,
             "has_proxima_etapa": self.has_proxima_etapa(),
+            "funcionarios_fase_atual": [
+                {"id": f.id_func, "nome": f.nome}
+                for f in fase_ativa.funcionarios
+            ] if fase_ativa else [],
         }
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]

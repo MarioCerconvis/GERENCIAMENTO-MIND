@@ -457,6 +457,7 @@ def api_criar_projeto():
 
     novo_proj = Projeto(
         os=os_code,
+        nome=body.get("nome", "").strip(),
         cliente=body.get("cliente", ""),
         solicitante=body.get("solicitante", ""),
         descricao=body.get("descricao", ""),
@@ -513,7 +514,7 @@ def api_criar_projeto():
 def api_editar_projeto(pid):
     p = Projeto.query.get_or_404(pid)
     body = request.get_json()
-    for field in ("os", "cliente", "solicitante", "descricao", "comentario"):
+    for field in ("os", "nome", "cliente", "solicitante", "descricao", "comentario"):
         if field in body:
             setattr(p, field, body[field].strip() if isinstance(body[field], str) else body[field])
     if "data_limite" in body:

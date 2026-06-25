@@ -13,6 +13,16 @@
             <option value="dentro">Dentro do SLA</option>
             <option value="fora">Fora do SLA</option>
         </select>
+        <select class="input-select" id="kanban-filter-funcionario">
+            <option value="">Todos os Funcionários</option>
+        </select>
+        <select class="input-select" id="kanban-filter-prioridade">
+            <option value="">Todas as Prioridades</option>
+            <option value="0">Sem flag</option>
+            <option value="1">🟡 Importante</option>
+            <option value="2">🟠 Prioridade</option>
+            <option value="3">🔴 Urgente</option>
+        </select>
         <button class="btn btn-ghost" id="btn-historico">Ver Histórico</button>
         <button class="btn btn-primary" id="btn-novo-projeto" style="display:none;">+ Novo Projeto</button>
         <button class="btn btn-ghost" id="btn-nova-fase" style="display:none;">+ Nova Fase</button>
@@ -42,6 +52,12 @@
                         <label for="proj-os">OS (Ordem de Serviço) *</label>
                         <input type="text" id="proj-os" required>
                     </div>
+                    <div class="form-group">
+                        <label for="proj-nome">Nome do Projeto *</label>
+                        <input type="text" id="proj-nome" required>
+                    </div>
+                </div>
+                <div class="form-row">
                     <div class="form-group">
                         <label for="proj-cliente">Cliente</label>
                         <input type="text" id="proj-cliente">
@@ -94,7 +110,10 @@
 <div class="modal-overlay" id="modal-detalhe" style="display:none;">
     <div class="modal-card modal-lg">
         <div class="modal-header">
-            <h2 id="detalhe-titulo">Projeto</h2>
+            <div>
+                <h2 id="detalhe-titulo">Projeto</h2>
+                <h3 id="detalhe-subtitulo" style="font-size: 14px; color: #64748b; margin-top: 4px; font-weight: 500;"></h3>
+            </div>
             <button class="modal-close" onclick="fecharModal('modal-detalhe')">&times;</button>
         </div>
         <div class="modal-body" id="detalhe-body">
@@ -230,5 +249,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/kanban.js?v=3"></script>
+<script src="/static/js/kanban.js?v=7"></script>
 {% endblock %}
