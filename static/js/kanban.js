@@ -737,7 +737,9 @@ async function openDetail(objetoId) {
             <div class="detail-item"><span class="detail-label">Responsável</span><span class="detail-value">${p.responsavel_nome || "—"}</span></div>
             <div class="detail-item"><span class="detail-label">Fase Atual</span><span class="detail-value">${p.fase_atual_nome || "Sem fase"}</span></div>
         </div>
-        ${p.descricao ? `<div class="detail-item" style="margin-bottom:16px;"><span class="detail-label">Descrição</span><span class="detail-value">${p.descricao}</span></div>` : ""}
+        ${p.projeto_descricao ? `<div class="detail-item" style="margin-bottom:16px;"><span class="detail-label">Descrição (OS)</span><span class="detail-value" style="white-space: pre-wrap;">${p.projeto_descricao}</span></div>` : ""}
+        ${p.descricao ? `<div class="detail-item" style="margin-bottom:16px;"><span class="detail-label">Descrição (Módulo)</span><span class="detail-value" style="white-space: pre-wrap;">${p.descricao}</span></div>` : ""}
+        ${p.projeto_comentario ? `<div class="detail-item" style="margin-bottom:16px;"><span class="detail-label">Comentário MACRO</span><span class="detail-value" style="white-space: pre-wrap;">${p.projeto_comentario}</span></div>` : ""}
     `;
 
     // ── Histórico de fases ──
@@ -860,7 +862,7 @@ async function enviarComentario(objetoId) {
     if (res.ok) {
         showToast("Comentário adicionado!", "success");
         // Reabrir o detalhe para mostrar o novo comentário
-        openDetail(projetoId);
+        openDetail(objetoId);
     } else {
         const err = await res.json();
         showToast(err.erro || "Erro ao comentar", "error");

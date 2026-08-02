@@ -853,13 +853,14 @@ def api_listar_comentarios_objeto(oid):
 @app.route("/api/objetos/<int:oid>/comentarios", methods=["POST"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_criar_comentario_objeto(oid):
-    Objeto.query.get_or_404(oid)
+    obj = Objeto.query.get_or_404(oid)
     u = get_usuario_logado()
     body = request.get_json()
     texto = body.get("texto", "").strip()
     if not texto:
         return jsonify({"erro": "Texto é obrigatório"}), 400
     comentario = Comentario(
+        projeto_id=obj.projeto_id,
         objeto_id=oid,
         usuario_id=u.id,
         texto=texto,
