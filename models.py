@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, date
 
 from flask_sqlalchemy import SQLAlchemy
@@ -191,6 +192,53 @@ class Projeto(db.Model):
         return d
 
 
+# ─── Utilitário: Parser de etapas pré-definidas ──────────────────────────────
+
+def parse_etapas(raw):
+    """Converte etapas_pre_definidas (CSV legado ou JSON rico) em lista padronizada.
+    
+    Retorna: [{"fase_id": int, "data_limite": str|None, "funcionario_id": int|None}, ...]
+    """
+    if not raw or not str(raw).strip():
+        return []
+    
+    raw = str(raw).strip()
+    
+    # Tentar JSON primeiro (formato novo)
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+            result = []
+            for item in parsed:
+                if isinstance(item, dict):
+                    result.append({
+                        "fase_id": int(item.get("fase_id", 0)),
+                        "data_limite": item.get("data_limite") or None,
+                        "funcionario_id": int(item["funcionario_id"]) if item.get("funcionario_id") else None,
+                    })
+                elif isinstance(item, (int, float)):
+                    result.append({"fase_id": int(item), "data_limite": None, "funcionario_id": None})
+            return result
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return []
+    
+    # Fallback: CSV legado ("1,4,5")
+    try:
+        return [
+            {"fase_id": int(v.strip()), "data_limite": None, "funcionario_id": None}
+            for v in raw.split(",") if v.strip()
+        ]
+    except ValueError:
+        return []
+
+
+def serialize_etapas(etapas_list):
+    """Serializa lista de etapas para armazenamento na coluna (JSON string)."""
+    if not etapas_list:
+        return None
+    return json.dumps(etapas_list, ensure_ascii=False)
+
+
 # ─── Objeto ───────────────────────────────────────────────────────────────────
 
 class Objeto(db.Model):
@@ -202,7 +250,7 @@ class Objeto(db.Model):
     data_limite = db.Column(db.Date, nullable=False) # SLA do objeto
     responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
     fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
-    etapas_pre_definidas = db.Column(db.String(255), nullable=True)  # Sequência de IDs de fases (ex: "1,4,5")
+    etapas_pre_definidas = db.Column(db.Text, nullable=True)  # JSON array de objetos ou CSV legado
     prioridade = db.Column(db.Integer, default=0)  # 0: sem flag, 1: Importante, 2: Prioridade, 3: Urgente
     ordem_kanban = db.Column(db.Integer, default=0)
 
@@ -233,18 +281,19 @@ class Objeto(db.Model):
         return (datetime.utcnow() - fase_ativa.data_entrada).days
 
     def calcular_indice_fase_atual(self):
-        if not self.etapas_pre_definidas:
+        etapas_list = parse_etapas(self.etapas_pre_definidas)
+        if not etapas_list:
             return -1
         
-        etapas = [int(e.strip()) for e in self.etapas_pre_definidas.split(",") if e.strip()]
-        if not etapas:
+        etapas_ids = [e["fase_id"] for e in etapas_list]
+        if not etapas_ids:
             return -1
             
         fase_atual = self.fase_atual_id
-        if fase_atual not in etapas:
+        if fase_atual not in etapas_ids:
             return -1
             
-        indices = [i for i, x in enumerate(etapas) if x == fase_atual]
+        indices = [i for i, x in enumerate(etapas_ids) if x == fase_atual]
         if len(indices) == 1:
             return indices[0]
             
@@ -262,7 +311,7 @@ class Objeto(db.Model):
             match_len = 0
             h_idx = len(fases_visitadas) - 1
             e_idx = i
-            while h_idx >= 0 and e_idx >= 0 and fases_visitadas[h_idx] == etapas[e_idx]:
+            while h_idx >= 0 and e_idx >= 0 and fases_visitadas[h_idx] == etapas_ids[e_idx]:
                 match_len += 1
                 h_idx -= 1
                 e_idx -= 1
@@ -273,18 +322,15 @@ class Objeto(db.Model):
         return best_idx
 
     def has_proxima_etapa(self):
-        if not self.etapas_pre_definidas:
-            return False
-        
-        etapas = [int(e.strip()) for e in self.etapas_pre_definidas.split(",") if e.strip()]
-        if not etapas:
+        etapas_list = parse_etapas(self.etapas_pre_definidas)
+        if not etapas_list:
             return False
             
         idx = self.calcular_indice_fase_atual()
         if idx == -1:
             return True # se tem fluxo mas a fase não tá nele, ele pode entrar na primeira fase
             
-        return idx + 1 < len(etapas)
+        return idx + 1 < len(etapas_list)
 
     def to_dict(self, include_historico=False):
         fase_ativa = ObjetoFase.query.filter_by(objeto_id=self.id, data_saida=None).first()
@@ -324,7 +370,7 @@ class Objeto(db.Model):
                 "dias_na_fase": self.dias_na_fase_atual(),
             },
             "sla_fase": sla_fase,
-            "etapas_pre_definidas": self.etapas_pre_definidas,
+            "etapas_pre_definidas": parse_etapas(self.etapas_pre_definidas),
             "has_proxima_etapa": self.has_proxima_etapa(),
             "funcionarios_fase_atual": [
                 {"id": f.id_func, "nome": f.nome}

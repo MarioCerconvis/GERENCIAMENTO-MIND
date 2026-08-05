@@ -451,12 +451,21 @@ function adicionarModuloUI(dadosModulo = null) {
     
     // Preparar UI do fluxo de fases se estiver editando
     let fluxoHtml = "";
-    if (dadosModulo && dadosModulo.etapas_pre_definidas) {
-        const etapas = String(dadosModulo.etapas_pre_definidas).split(",");
-        etapas.forEach(val => {
-            if (!val.trim()) return;
-            const selOpts = allFases.map(f => `<option value="${f.id}" ${f.id == val ? 'selected' : ''}>${f.nome}</option>`).join("");
-            fluxoHtml += `<select class="input-select mod-etapa-step" style="width:auto; margin-bottom:4px;"><option value="">--</option>${selOpts}</select>`;
+    if (dadosModulo && dadosModulo.etapas_pre_definidas && Array.isArray(dadosModulo.etapas_pre_definidas)) {
+        dadosModulo.etapas_pre_definidas.forEach(etapa => {
+            const faseId = etapa.fase_id || etapa;
+            const dataLim = etapa.data_limite || "";
+            const funcId = etapa.funcionario_id || "";
+            if (!faseId) return;
+            const selOpts = allFases.map(f => `<option value="${f.id}" ${f.id == faseId ? 'selected' : ''}>${f.nome}</option>`).join("");
+            const funcOpts = allFuncionarios.map(f => `<option value="${f.id}" ${f.id == funcId ? 'selected' : ''}>${f.nome}</option>`).join("");
+            fluxoHtml += `
+                <div class="fluxo-step-item" style="display:flex; gap:6px; align-items:center; margin-bottom:6px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; flex-wrap:wrap;">
+                    <select class="input-select mod-etapa-step-fase" style="flex:2; min-width:120px;" onchange="onFluxoFaseChange(this)"><option value="">-- Fase --</option>${selOpts}</select>
+                    <input type="date" class="mod-etapa-step-data" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" value="${dataLim}" placeholder="Data esperada">
+                    <select class="input-select mod-etapa-step-func" style="flex:2; min-width:120px;"><option value="">-- Funcionário (opcional) --</option>${funcOpts}</select>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="removeFluxoStep(this)" style="color:#ef4444; padding:4px 8px; min-width:auto;">✕</button>
+                </div>`;
         });
     }
 
@@ -496,8 +505,8 @@ function adicionarModuloUI(dadosModulo = null) {
             </div>
             
             <div class="form-group" style="grid-column: 1 / -1;">
-                <label>Fluxo de Fases Pré-Definidas (Opcional, em ordem)</label>
-                <div class="mod-fluxo-container" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                <label>Fluxo de Fases Pré-Definidas <span style="font-weight:normal; color:#94a3b8;">(Opcional, em ordem)</span></label>
+                <div class="mod-fluxo-container" style="margin-bottom:8px;">
                     ${fluxoHtml}
                 </div>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="addFluxoStep(this)">+ Adicionar Passo do Fluxo</button>
@@ -515,12 +524,44 @@ function adicionarModuloUI(dadosModulo = null) {
 window.addFluxoStep = function(btn) {
     const container = btn.previousElementSibling;
     const faseOptions = allFases.map(f => `<option value="${f.id}">${f.nome}</option>`).join("");
-    const sel = document.createElement("select");
-    sel.className = "input-select mod-etapa-step";
-    sel.style.width = "auto";
-    sel.style.marginBottom = "4px";
-    sel.innerHTML = `<option value="">--</option>${faseOptions}`;
-    container.appendChild(sel);
+    const funcOptions = allFuncionarios.map(f => `<option value="${f.id}">${f.nome}</option>`).join("");
+    const stepHtml = `
+        <div class="fluxo-step-item" style="display:flex; gap:6px; align-items:center; margin-bottom:6px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; flex-wrap:wrap;">
+            <select class="input-select mod-etapa-step-fase" style="flex:2; min-width:120px;" onchange="onFluxoFaseChange(this)"><option value="">-- Fase --</option>${faseOptions}</select>
+            <input type="date" class="mod-etapa-step-data" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" placeholder="Data esperada">
+            <select class="input-select mod-etapa-step-func" style="flex:2; min-width:120px;"><option value="">-- Funcionário (opcional) --</option>${funcOptions}</select>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="removeFluxoStep(this)" style="color:#ef4444; padding:4px 8px; min-width:auto;">✕</button>
+        </div>`;
+    container.insertAdjacentHTML('beforeend', stepHtml);
+}
+
+window.removeFluxoStep = function(btn) {
+    btn.closest(".fluxo-step-item").remove();
+}
+
+window.onFluxoFaseChange = async function(selectEl) {
+    const faseId = selectEl.value;
+    const stepItem = selectEl.closest(".fluxo-step-item");
+    const funcSelect = stepItem.querySelector(".mod-etapa-step-func");
+    
+    if (!faseId) {
+        // Reset func select with all employees
+        const allOpts = allFuncionarios.map(f => `<option value="${f.id}">${f.nome}</option>`).join("");
+        funcSelect.innerHTML = `<option value="">-- Funcionário (opcional) --</option>${allOpts}`;
+        return;
+    }
+    
+    // Fetch eligible employees for this phase
+    try {
+        const res = await fetch(`/api/fases/${faseId}/funcionarios-elegiveis`);
+        if (res.ok) {
+            const elegíveis = await res.json();
+            const opts = elegíveis.map(f => `<option value="${f.id}">${f.nome}</option>`).join("");
+            funcSelect.innerHTML = `<option value="">-- Funcionário (opcional) --</option>${opts}`;
+        }
+    } catch (e) {
+        console.error("Erro ao buscar funcionários elegíveis:", e);
+    }
 }
 
 function removerModuloUI(id) {
@@ -581,7 +622,15 @@ async function saveProject() {
             const modData = mod.querySelector(".mod-data").value;
             const modResp = mod.querySelector(".mod-responsavel").value;
             const modDesc = mod.querySelector(".mod-descricao").value;
-            const modEtapas = Array.from(mod.querySelectorAll(".mod-etapa-step")).map(s => s.value).filter(v => v);
+            const modEtapas = Array.from(mod.querySelectorAll(".fluxo-step-item")).map(step => {
+                const faseId = step.querySelector(".mod-etapa-step-fase")?.value;
+                if (!faseId) return null;
+                return {
+                    fase_id: parseInt(faseId),
+                    data_limite: step.querySelector(".mod-etapa-step-data")?.value || null,
+                    funcionario_id: step.querySelector(".mod-etapa-step-func")?.value ? parseInt(step.querySelector(".mod-etapa-step-func").value) : null
+                };
+            }).filter(v => v !== null);
             
             data.objetos.push({
                 nome: modNome,
@@ -589,7 +638,7 @@ async function saveProject() {
                 data_limite: modData || null,
                 responsavel_id: modResp ? parseInt(modResp) : null,
                 descricao: modDesc,
-                etapas_pre_definidas: modEtapas.length > 0 ? modEtapas.map(Number) : null
+                etapas_pre_definidas: modEtapas.length > 0 ? modEtapas : null
             });
         });
         
@@ -742,7 +791,38 @@ async function openDetail(objetoId) {
         ${p.projeto_comentario ? `<div class="detail-item" style="margin-bottom:16px;"><span class="detail-label">Comentário MACRO</span><span class="detail-value" style="white-space: pre-wrap;">${p.projeto_comentario}</span></div>` : ""}
     `;
 
-    // ── Histórico de fases ──
+    // ── Roadmap Pré-Definido ──
+    const etapas = p.etapas_pre_definidas;
+    if (etapas && Array.isArray(etapas) && etapas.length > 0) {
+        html += `<div class="detail-section-title">Roadmap Pré-Definido</div>`;
+        html += `<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:20px;">`;
+        etapas.forEach((etapa, idx) => {
+            const faseObj = allFases.find(f => f.id === etapa.fase_id);
+            const faseNome = faseObj ? faseObj.nome : `Fase #${etapa.fase_id}`;
+            const faseCor = faseObj ? faseObj.cor : "#94a3b8";
+            const isCurrent = etapa.fase_id === p.fase_atual_id;
+            const funcNome = etapa.funcionario_id 
+                ? (allFuncionarios.find(f => f.id === etapa.funcionario_id)?.nome || "—") 
+                : "—";
+            const dataLim = etapa.data_limite ? formatDate(etapa.data_limite) : "—";
+
+            html += `
+                <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:${isCurrent ? 'rgba(99,102,241,0.08)' : 'var(--bg-primary)'}; border:1px solid ${isCurrent ? faseCor : 'var(--border)'}; border-radius:var(--radius); ${isCurrent ? 'box-shadow: 0 0 0 2px ' + faseCor + '33;' : ''}">
+                    <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${idx + 1}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome} ${isCurrent ? '<span style="font-size:11px;background:' + faseCor + ';color:#fff;padding:1px 6px;border-radius:10px;margin-left:6px;">ATUAL</span>' : ''}</div>
+                    </div>
+                    <div style="display:flex;gap:16px;font-size:13px;color:var(--text-secondary);flex-shrink:0;">
+                        <span title="Prazo esperado">📅 ${dataLim}</span>
+                        <span title="Funcionário pré-definido">👤 ${funcNome}</span>
+                    </div>
+                </div>
+            `;
+        });
+        html += `</div>`;
+    }
+
+
     if (p.historico && p.historico.length > 0) {
         html += `<div class="detail-section-title">Histórico de Fases</div><div class="timeline">`;
         p.historico.forEach(h => {
@@ -1077,12 +1157,14 @@ async function buscarHistorico() {
                                 </div>
                             `;
                         } else if (ev.tipo === "fase_futura") {
+                            const dataLabel = ev.data_str === "Pendente" ? "Previsto" : `Prazo: ${ev.data_str}`;
+                            const respLabel = ev.responsavel === "—" ? "A definir" : ev.responsavel;
                             html += `
                                 <div class="timeline-item timeline-item-future" style="--item-color: ${ev.fase_cor};">
                                     <div class="timeline-fase"><i class="fa-solid fa-hourglass-start"></i> ${ev.fase_nome} (Pendente)</div>
                                     <div class="timeline-meta">
-                                        <span><i class="fa-regular fa-clock"></i> Previsto</span>
-                                        <span><i class="fa-solid fa-user-tag"></i> A definir</span>
+                                        <span><i class="fa-regular fa-clock"></i> ${dataLabel}</span>
+                                        <span><i class="fa-solid fa-user-tag"></i> ${respLabel}</span>
                                     </div>
                                 </div>
                             `;

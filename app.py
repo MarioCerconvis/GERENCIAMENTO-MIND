@@ -8,7 +8,7 @@ from config import Config
 from models import (
     db, configure_db, Usuario, Funcionario, Funcao, Fase,
     Projeto, Objeto, ObjetoFase, Comentario, funcionario_funcao, fase_funcao,
-    objeto_fase_funcionario,
+    objeto_fase_funcionario, parse_etapas, serialize_etapas,
 )
 from auth import get_usuario_logado, requer_login, requer_perfil, requer_perfil_api, get_abas_usuario
 from notifications import notificar_atribuicao, notificar_mudanca_fase
@@ -482,7 +482,7 @@ def api_criar_projeto():
         nome_obj = obj_data.get("nome", "").strip() or "Módulo 1"
 
         etapas = obj_data.get("etapas_pre_definidas")
-        etapas_str = ",".join(map(str, etapas)) if isinstance(etapas, list) else None
+        etapas_str = serialize_etapas(etapas) if isinstance(etapas, list) else None
 
         novo_obj = Objeto(
             projeto_id=novo_proj.projeto_id,
@@ -559,7 +559,7 @@ def api_editar_objeto(oid):
         o.responsavel_id = body["responsavel_id"]
     if "etapas_pre_definidas" in body:
         etapas = body["etapas_pre_definidas"]
-        o.etapas_pre_definidas = ",".join(map(str, etapas)) if isinstance(etapas, list) else None
+        o.etapas_pre_definidas = serialize_etapas(etapas) if isinstance(etapas, list) else None
         
     u = get_usuario_logado()
     if "prioridade" in body and u and u.perfil == "admin":
@@ -588,7 +588,7 @@ def api_criar_objeto(pid):
     responsavel_id = body.get("responsavel_id", p.responsavel_id)
 
     etapas = body.get("etapas_pre_definidas")
-    etapas_str = ",".join(map(str, etapas)) if isinstance(etapas, list) else None
+    etapas_str = serialize_etapas(etapas) if isinstance(etapas, list) else None
 
     novo_obj = Objeto(
         projeto_id=pid,
@@ -677,30 +677,32 @@ def api_mover_fase(oid):
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_concluir_fase(oid):
     o = Objeto.query.get_or_404(oid)
-    if not o.etapas_pre_definidas:
+    etapas_list = parse_etapas(o.etapas_pre_definidas)
+    if not etapas_list:
         return jsonify({"erro": "Este módulo não possui um fluxo de etapas pré-definido."}), 400
     
-    etapas = [int(e.strip()) for e in o.etapas_pre_definidas.split(",") if e.strip()]
-    if not etapas:
-        return jsonify({"erro": "Fluxo de etapas pré-definido está vazio."}), 400
+    etapas_ids = [e["fase_id"] for e in etapas_list]
 
     fase_atual = o.fase_atual_id
-    proxima_fase_id = None
+    proxima_idx = None
     
     if fase_atual is None:
         # Se estiver sem fase, move para a primeira da lista
-        proxima_fase_id = etapas[0]
+        proxima_idx = 0
     else:
         idx = o.calcular_indice_fase_atual()
         if idx != -1:
-            if idx + 1 < len(etapas):
-                proxima_fase_id = etapas[idx + 1]
+            if idx + 1 < len(etapas_list):
+                proxima_idx = idx + 1
             else:
                 return jsonify({"erro": "Esta já é a última fase do fluxo pré-definido."}), 400
         else:
             # Fase atual não está na lista. Inicia o fluxo pré-definido a partir da primeira.
-            proxima_fase_id = etapas[0]
+            proxima_idx = 0
             
+    proxima_etapa = etapas_list[proxima_idx]
+    proxima_fase_id = proxima_etapa["fase_id"]
+    
     nova_fase = Fase.query.get_or_404(proxima_fase_id)
     if nova_fase.ativa == False:
         return jsonify({"erro": "A próxima fase do fluxo está desativada."}), 400
@@ -709,16 +711,36 @@ def api_concluir_fase(oid):
     fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
+    
+    # Determinar data_limite e responsável da nova fase (pré-definidos ou fallback)
+    data_limite_fase = None
+    if proxima_etapa.get("data_limite"):
+        try:
+            data_limite_fase = date.fromisoformat(proxima_etapa["data_limite"])
+        except (ValueError, TypeError):
+            data_limite_fase = None
+    if not data_limite_fase:
+        data_limite_fase = o.data_limite  # Fallback: limite do objeto
+    
+    responsavel_fase_id = proxima_etapa.get("funcionario_id") or o.responsavel_id
         
     # Abrir nova fase
     of = ObjetoFase(
         objeto_id=oid,
         id_fase=proxima_fase_id,
-        responsavel_fase_id=o.responsavel_id,
-        data_limite=o.data_limite  # Mantemos o limite do objeto por simplicidade
+        responsavel_fase_id=responsavel_fase_id,
+        data_limite=data_limite_fase
     )
     db.session.add(of)
     o.fase_atual_id = proxima_fase_id
+    
+    # Se há funcionário pré-definido, atribuí-lo automaticamente à fase
+    if proxima_etapa.get("funcionario_id"):
+        func_pre = Funcionario.query.get(proxima_etapa["funcionario_id"])
+        if func_pre:
+            db.session.flush()  # Garante que of.id está disponível
+            of.funcionarios.append(func_pre)
+    
     db.session.commit()
     
     # Notificar equipe da nova fase
@@ -957,24 +979,37 @@ def api_historico_atividade(os_code):
             del e["data"]
             
         # Adicionar fases futuras esperadas (se houver fluxo pré-definido)
-        if obj.etapas_pre_definidas:
-            etapas = [int(e.strip()) for e in obj.etapas_pre_definidas.split(",") if e.strip()]
-            fases_futuras = []
+        etapas_list = parse_etapas(obj.etapas_pre_definidas)
+        if etapas_list:
+            fases_futuras_etapas = []
             idx = obj.calcular_indice_fase_atual()
             if idx != -1:
-                fases_futuras = etapas[idx+1:]
+                fases_futuras_etapas = etapas_list[idx+1:]
             else:
-                fases_futuras = etapas
+                fases_futuras_etapas = etapas_list
                 
-            for fase_id in fases_futuras:
-                f = Fase.query.get(fase_id)
+            for etapa in fases_futuras_etapas:
+                f = Fase.query.get(etapa["fase_id"])
                 if f:
+                    func_nome = "—"
+                    if etapa.get("funcionario_id"):
+                        func = Funcionario.query.get(etapa["funcionario_id"])
+                        func_nome = func.nome if func else "—"
+                    
+                    data_esperada = "Pendente"
+                    if etapa.get("data_limite"):
+                        try:
+                            dt = date.fromisoformat(etapa["data_limite"])
+                            data_esperada = dt.strftime("%d/%m/%Y")
+                        except (ValueError, TypeError):
+                            pass
+                    
                     eventos.append({
                         "tipo": "fase_futura",
-                        "data_str": "Pendente",
+                        "data_str": data_esperada,
                         "fase_nome": f.nome_fase,
                         "fase_cor": f.cor,
-                        "responsavel": "—",
+                        "responsavel": func_nome,
                         "tmo_dias": 0,
                         "data_iso": None
                     })
