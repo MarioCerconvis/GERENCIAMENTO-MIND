@@ -797,6 +797,64 @@ def api_remover_funcionario_fase(of_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  API: Reatribuir funcionário na fase ativa de um objeto
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/objetos/<int:oid>/reatribuir-fase", methods=["PUT"])
+@requer_perfil_api("admin", "gestor")
+def api_reatribuir_fase(oid):
+    """Reatribui o responsável e/ou equipe na fase ativa de um objeto (módulo)."""
+    o = Objeto.query.get_or_404(oid)
+    body = request.get_json()
+
+    # Buscar a fase ativa (data_saida = NULL)
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+    if not fase_ativa:
+        return jsonify({"erro": "Este módulo não possui uma fase ativa no momento."}), 400
+
+    fase = db.session.get(Fase, fase_ativa.id_fase)
+
+    # Reatribuir responsável principal da fase
+    novo_resp_id = body.get("novo_responsavel_id")
+    if novo_resp_id:
+        novo_resp = Funcionario.query.get_or_404(novo_resp_id)
+        # Validar elegibilidade
+        if fase and fase.funcoes_exigidas:
+            funcoes_func = {f.id_funcao for f in novo_resp.funcoes}
+            funcoes_fase = {f.id_funcao for f in fase.funcoes_exigidas}
+            if not funcoes_func.intersection(funcoes_fase):
+                nomes_exigidas = ", ".join([f.nome_funcao for f in fase.funcoes_exigidas])
+                return jsonify({
+                    "erro": f"O funcionário '{novo_resp.nome}' não possui as funções exigidas por esta fase. Funções necessárias: {nomes_exigidas}"
+                }), 400
+        fase_ativa.responsavel_fase_id = novo_resp_id
+        o.responsavel_id = novo_resp_id
+
+    # Substituir toda a equipe da fase ativa
+    funcionarios_ids = body.get("funcionarios_ids")
+    if funcionarios_ids is not None:
+        novos_funcs = []
+        for fid in funcionarios_ids:
+            func = Funcionario.query.get(fid)
+            if not func:
+                continue
+            # Validar elegibilidade
+            if fase and fase.funcoes_exigidas:
+                funcoes_func = {f.id_funcao for f in func.funcoes}
+                funcoes_fase = {f.id_funcao for f in fase.funcoes_exigidas}
+                if not funcoes_func.intersection(funcoes_fase):
+                    nomes_exigidas = ", ".join([fn.nome_funcao for fn in fase.funcoes_exigidas])
+                    return jsonify({
+                        "erro": f"O funcionário '{func.nome}' não possui as funções exigidas. Funções necessárias: {nomes_exigidas}"
+                    }), 400
+            novos_funcs.append(func)
+        fase_ativa.funcionarios = novos_funcs
+
+    db.session.commit()
+    return jsonify(o.to_dict(include_historico=True))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  API: Kanban board data
 # ═══════════════════════════════════════════════════════════════════════════════
 

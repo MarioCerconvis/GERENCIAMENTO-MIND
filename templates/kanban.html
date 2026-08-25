@@ -203,6 +203,30 @@
     </div>
 </div>
 
+<!-- Modal: Reatribuir Responsável da Fase Ativa -->
+<div class="modal-overlay" id="modal-reatribuir" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h2>Reatribuir Responsável</h2>
+            <button class="modal-close" onclick="fecharModal('modal-reatribuir')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="reatribuir-objeto-id">
+            <p style="margin-bottom:12px; color:var(--text-secondary); font-size:13px;">Selecione o novo responsável principal para a fase ativa deste módulo.</p>
+            <div class="form-group">
+                <label>Funcionários elegíveis:</label>
+                <select id="reatribuir-funcionario" class="input-select">
+                    <option value="">Selecionar...</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-reatribuir')">Cancelar</button>
+            <button class="btn btn-primary" id="btn-confirmar-reatribuir">Confirmar</button>
+        </div>
+    </div>
+</div>
+
 <!-- Modal: Histórico de Atividade -->
 <div class="modal-overlay" id="modal-historico" style="display:none;">
     <div class="modal-card modal-lg">
@@ -249,5 +273,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/kanban.js?v=7"></script>
+<script src="/static/js/kanban.js?v=8"></script>
 {% endblock %}

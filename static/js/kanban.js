@@ -794,32 +794,71 @@ async function openDetail(objetoId) {
     // ── Roadmap Pré-Definido ──
     const etapas = p.etapas_pre_definidas;
     if (etapas && Array.isArray(etapas) && etapas.length > 0) {
+        // Determinar o índice da fase atual no roadmap
+        let currentIdx = -1;
+        const etapaIds = etapas.map(e => e.fase_id);
+        if (p.fase_atual_id) {
+            currentIdx = etapaIds.lastIndexOf(p.fase_atual_id);
+        }
+        const canEdit = ["admin", "gestor"].includes(currentUser?.perfil);
+
         html += `<div class="detail-section-title">Roadmap Pré-Definido</div>`;
-        html += `<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:20px;">`;
+        html += `<div id="roadmap-editor" data-objeto-id="${p.id}" style="display:flex; flex-direction:column; gap:6px; margin-bottom:20px;">`;
         etapas.forEach((etapa, idx) => {
             const faseObj = allFases.find(f => f.id === etapa.fase_id);
             const faseNome = faseObj ? faseObj.nome : `Fase #${etapa.fase_id}`;
             const faseCor = faseObj ? faseObj.cor : "#94a3b8";
-            const isCurrent = etapa.fase_id === p.fase_atual_id;
+            const isCurrent = (idx === currentIdx);
+            const isFuture = (currentIdx === -1) || (idx > currentIdx);
             const funcNome = etapa.funcionario_id 
                 ? (allFuncionarios.find(f => f.id === etapa.funcionario_id)?.nome || "—") 
                 : "—";
             const dataLim = etapa.data_limite ? formatDate(etapa.data_limite) : "—";
 
-            html += `
-                <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:${isCurrent ? 'rgba(99,102,241,0.08)' : 'var(--bg-primary)'}; border:1px solid ${isCurrent ? faseCor : 'var(--border)'}; border-radius:var(--radius); ${isCurrent ? 'box-shadow: 0 0 0 2px ' + faseCor + '33;' : ''}">
-                    <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${idx + 1}</span>
-                    <div style="flex:1;min-width:0;">
-                        <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome} ${isCurrent ? '<span style="font-size:11px;background:' + faseCor + ';color:#fff;padding:1px 6px;border-radius:10px;margin-left:6px;">ATUAL</span>' : ''}</div>
+            if (canEdit && isFuture && !isCurrent) {
+                // Editable row for future steps
+                const funcOptions = allFuncionarios.map(f => `<option value="${f.id}" ${f.id === etapa.funcionario_id ? 'selected' : ''}>${f.nome}</option>`).join("");
+                html += `
+                    <div class="roadmap-step" data-step-idx="${idx}" style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--bg-primary); border:1px dashed var(--border); border-radius:var(--radius); flex-wrap:wrap;">
+                        <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${idx + 1}</span>
+                        <div style="flex:1;min-width:100px;">
+                            <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome}</div>
+                        </div>
+                        <input type="date" class="roadmap-step-data" value="${etapa.data_limite || ''}" style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; min-width:130px;" title="Prazo esperado">
+                        <select class="roadmap-step-func input-select" style="min-width:140px; font-size:13px;" title="Funcionário pré-definido" onchange="onRoadmapFaseChange(this, ${etapa.fase_id})">
+                            <option value="">-- Funcionário --</option>
+                            ${funcOptions}
+                        </select>
+                        <span style="font-size:11px;color:var(--text-muted);background:rgba(99,102,241,0.1);padding:2px 8px;border-radius:10px;">✏️ Editável</span>
                     </div>
-                    <div style="display:flex;gap:16px;font-size:13px;color:var(--text-secondary);flex-shrink:0;">
-                        <span title="Prazo esperado">📅 ${dataLim}</span>
-                        <span title="Funcionário pré-definido">👤 ${funcNome}</span>
+                `;
+            } else {
+                // Read-only row (past or current)
+                html += `
+                    <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:${isCurrent ? 'rgba(99,102,241,0.08)' : 'var(--bg-primary)'}; border:1px solid ${isCurrent ? faseCor : 'var(--border)'}; border-radius:var(--radius); ${isCurrent ? 'box-shadow: 0 0 0 2px ' + faseCor + '33;' : ''}">
+                        <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${idx + 1}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome} ${isCurrent ? '<span style="font-size:11px;background:' + faseCor + ';color:#fff;padding:1px 6px;border-radius:10px;margin-left:6px;">ATUAL</span>' : ''}</div>
+                        </div>
+                        <div style="display:flex;gap:16px;font-size:13px;color:var(--text-secondary);flex-shrink:0;">
+                            <span title="Prazo esperado">📅 ${dataLim}</span>
+                            <span title="Funcionário pré-definido">👤 ${funcNome}</span>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            }
         });
         html += `</div>`;
+
+        // Save button (only if there are future editable steps)
+        const hasFutureSteps = canEdit && etapas.some((_, idx) => (currentIdx === -1) || (idx > currentIdx));
+        if (hasFutureSteps) {
+            html += `
+                <div style="margin-bottom:20px;">
+                    <button class="btn btn-primary btn-sm" onclick="salvarRoadmapEditado(${p.id})" style="background:#6366f1;border-color:#6366f1;">💾 Salvar Alterações do Roadmap</button>
+                </div>
+            `;
+        }
     }
 
 
@@ -835,17 +874,28 @@ async function openDetail(objetoId) {
                         ${h.data_saida ? ` · Saída: ${formatDateTime(h.data_saida)}` : " · <strong>Ativa</strong>"}
                         · ${h.dias_na_fase} dia(s)
                     </div>
+                    ${h.responsavel_fase_nome ? `
+                        <div style="margin-top:6px;font-size:13px;color:var(--text-secondary);">
+                            <span class="detail-label" style="font-size:12px;">Responsável:</span> ${h.responsavel_fase_nome}
+                        </div>
+                    ` : ""}
                     ${h.funcionarios.length > 0 ? `
                         <div style="margin-top:8px;">
                             <span class="detail-label">Equipe:</span>
                             <div class="team-chips" style="margin-top:4px;">
-                                ${h.funcionarios.map(f => `<span class="team-chip">${f.nome}</span>`).join("")}
+                                ${h.funcionarios.map(f => {
+                                    if (isActive && ["admin", "gestor"].includes(currentUser?.perfil)) {
+                                        return `<span class="team-chip" style="display:inline-flex;align-items:center;gap:4px;">${f.nome} <button onclick="removerFuncionarioFaseAtiva(event, ${h.id}, ${f.id})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:0 2px;line-height:1;" title="Remover">✕</button></span>`;
+                                    }
+                                    return `<span class="team-chip">${f.nome}</span>`;
+                                }).join("")}
                             </div>
                         </div>
                     ` : ""}
                     ${isActive && ["admin", "gestor"].includes(currentUser?.perfil) ? `
-                        <div class="card-actions" style="margin-top:8px;">
+                        <div class="card-actions" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
                             <button class="btn btn-ghost btn-sm" onclick="openAssign(${h.id}, ${p.fase_atual_id})">+ Atribuir Funcionário</button>
+                            <button class="btn btn-ghost btn-sm" onclick="openReatribuir(${p.id}, ${p.fase_atual_id})" style="color:#6366f1;">🔄 Reatribuir Responsável</button>
                         </div>
                     ` : ""}
                 </div>
@@ -1029,6 +1079,130 @@ async function confirmAssign() {
     } else {
         const err = await res.json();
         showToast(err.erro || "Erro ao atribuir", "error");
+    }
+}
+
+// ─── Reatribuir Responsável da Fase Ativa ────────────────────────────────────
+
+async function openReatribuir(objetoId, faseId) {
+    document.getElementById("reatribuir-objeto-id").value = objetoId;
+    const res = await fetch(`/api/fases/${faseId}/funcionarios-elegiveis`);
+    if (!res.ok) return;
+    const funcionarios = await res.json();
+
+    const select = document.getElementById("reatribuir-funcionario");
+    select.innerHTML = '<option value="">Selecionar...</option>';
+    funcionarios.forEach(f => {
+        const funcoes = f.funcoes ? f.funcoes.map(fn => fn.nome).join(", ") : "";
+        select.innerHTML += `<option value="${f.id}">${f.nome} (${funcoes})</option>`;
+    });
+
+    abrirModal("modal-reatribuir");
+}
+
+document.getElementById("btn-confirmar-reatribuir")?.addEventListener("click", async () => {
+    const objetoId = document.getElementById("reatribuir-objeto-id").value;
+    const funcId = document.getElementById("reatribuir-funcionario").value;
+    if (!funcId) { showToast("Selecione um funcionário", "error"); return; }
+
+    const res = await fetch(`/api/objetos/${objetoId}/reatribuir-fase`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ novo_responsavel_id: parseInt(funcId) }),
+    });
+
+    if (res.ok) {
+        fecharModal("modal-reatribuir");
+        fecharModal("modal-detalhe");
+        showToast("Responsável reatribuído com sucesso!", "success");
+        await loadBoard();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao reatribuir", "error");
+    }
+});
+
+// ─── Remover Funcionário da Fase Ativa ───────────────────────────────────────
+
+async function removerFuncionarioFaseAtiva(event, objetoFaseId, funcionarioId) {
+    event.stopPropagation();
+    if (!confirm("Remover este funcionário da equipe da fase ativa?")) return;
+
+    const res = await fetch(`/api/objeto-fase/${objetoFaseId}/remover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ funcionario_id: funcionarioId }),
+    });
+
+    if (res.ok) {
+        showToast("Funcionário removido da fase!", "success");
+        // Re-fetch object detail to get the parent objeto_id
+        fecharModal("modal-detalhe");
+        await loadBoard();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao remover funcionário", "error");
+    }
+}
+
+// ─── Salvar Roadmap Editado ──────────────────────────────────────────────────
+
+async function salvarRoadmapEditado(objetoId) {
+    const container = document.getElementById("roadmap-editor");
+    if (!container) return;
+
+    // Rebuild the full etapas array from the roadmap editor
+    // Non-editable steps keep their original data, editable steps get new values
+    const allSteps = container.querySelectorAll("[data-step-idx], [style*='box-shadow']");
+    
+    // Fetch current object data to get the original etapas
+    const objRes = await fetch(`/api/objetos/${objetoId}`);
+    if (!objRes.ok) { showToast("Erro ao buscar dados do módulo", "error"); return; }
+    const objData = await objRes.json();
+    const etapasOriginais = objData.etapas_pre_definidas || [];
+
+    // Update only the editable steps
+    const editableSteps = container.querySelectorAll(".roadmap-step[data-step-idx]");
+    editableSteps.forEach(step => {
+        const idx = parseInt(step.dataset.stepIdx);
+        if (idx >= 0 && idx < etapasOriginais.length) {
+            const dataInput = step.querySelector(".roadmap-step-data");
+            const funcSelect = step.querySelector(".roadmap-step-func");
+            etapasOriginais[idx].data_limite = dataInput?.value || null;
+            etapasOriginais[idx].funcionario_id = funcSelect?.value ? parseInt(funcSelect.value) : null;
+        }
+    });
+
+    const res = await fetch(`/api/objetos/${objetoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ etapas_pre_definidas: etapasOriginais }),
+    });
+
+    if (res.ok) {
+        showToast("Roadmap atualizado com sucesso!", "success");
+        openDetail(objetoId); // Reabrir para refletir mudanças
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao salvar roadmap", "error");
+    }
+}
+
+// ─── Filtrar funcionários elegíveis no roadmap por fase ──────────────────────
+
+async function onRoadmapFaseChange(selectEl, faseId) {
+    if (!faseId) return;
+    try {
+        const res = await fetch(`/api/fases/${faseId}/funcionarios-elegiveis`);
+        if (res.ok) {
+            const currentValue = selectEl.value;
+            const elegiveis = await res.json();
+            const opts = elegiveis.map(f => `<option value="${f.id}" ${f.id == currentValue ? 'selected' : ''}>${f.nome}</option>`).join("");
+            selectEl.innerHTML = `<option value="">-- Funcionário --</option>${opts}`;
+            if (currentValue) selectEl.value = currentValue;
+        }
+    } catch (e) {
+        console.error("Erro ao buscar funcionários elegíveis:", e);
     }
 }
 
