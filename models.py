@@ -34,6 +34,7 @@ objeto_fase_funcionario = db.Table(
     db.Column("id_objeto_fase", db.Integer, db.ForeignKey("objeto_fase.id"), primary_key=True),
     db.Column("id_funcionario", db.Integer, db.ForeignKey("funcionarios.id_func"), primary_key=True),
     db.Column("atribuido_em", db.DateTime, default=datetime.utcnow),
+    db.Column("aprovado_em", db.DateTime, nullable=True),  # NULL = pendente, preenchido = aprovado
 )
 
 
@@ -376,7 +377,27 @@ class Objeto(db.Model):
                 {"id": f.id_func, "nome": f.nome}
                 for f in fase_ativa.funcionarios
             ] if fase_ativa else [],
+            "aprovacao": fase_ativa.to_dict()["aprovacao"] if fase_ativa else {"aprovados": 0, "total": 0, "todos_aprovaram": True},
+            "fase_ativa_id": fase_ativa.id if fase_ativa else None,
         }
+
+        # Incluir se o usuário logado já aprovou (para o botão no card)
+        if fase_ativa and fase_ativa.funcionarios:
+            aprovacao_rows = fase_ativa._get_aprovacao_rows()
+            d["aprovacao_funcionarios"] = [
+                {
+                    "id": f.id_func,
+                    "nome": f.nome,
+                    "aprovado_em": next(
+                        (r.aprovado_em.isoformat() for r in aprovacao_rows if r.id_funcionario == f.id_func and r.aprovado_em),
+                        None
+                    ),
+                }
+                for f in fase_ativa.funcionarios
+            ]
+        else:
+            d["aprovacao_funcionarios"] = []
+
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]
             d["comentarios"] = [c.to_dict() for c in Comentario.query.filter_by(
@@ -413,8 +434,48 @@ class ObjetoFase(db.Model):
             return None
         return (self.data_limite - date.today()).days
 
+    # ── Helpers de aprovação ──────────────────────────────────────────────
+
+    def _get_aprovacao_rows(self):
+        """Retorna as linhas da tabela associativa para esta fase."""
+        return db.session.execute(
+            objeto_fase_funcionario.select().where(
+                objeto_fase_funcionario.c.id_objeto_fase == self.id
+            )
+        ).fetchall()
+
+    def total_aprovacoes(self):
+        """Retorna (aprovados, total) de funcionários atribuídos."""
+        rows = self._get_aprovacao_rows()
+        total = len(rows)
+        aprovados = sum(1 for r in rows if r.aprovado_em is not None)
+        return aprovados, total
+
+    def todos_aprovaram(self):
+        """True se todos os funcionários atribuídos deram aprovação."""
+        aprovados, total = self.total_aprovacoes()
+        if total == 0:
+            return True  # Sem funcionários = nada a aprovar
+        return aprovados >= total
+
+    def funcionario_ja_aprovou(self, funcionario_id):
+        """True se o funcionário específico já aprovou esta fase."""
+        row = db.session.execute(
+            objeto_fase_funcionario.select().where(
+                db.and_(
+                    objeto_fase_funcionario.c.id_objeto_fase == self.id,
+                    objeto_fase_funcionario.c.id_funcionario == funcionario_id,
+                )
+            )
+        ).fetchone()
+        return row is not None and row.aprovado_em is not None
+
     def to_dict(self):
         dias_restantes = self.dias_restantes_sla()
+        aprovacao_rows = self._get_aprovacao_rows()
+        aprovacao_map = {r.id_funcionario: r.aprovado_em for r in aprovacao_rows}
+        aprovados, total = self.total_aprovacoes()
+
         return {
             "id": self.id,
             "fase_id": self.id_fase,
@@ -428,7 +489,18 @@ class ObjetoFase(db.Model):
             "dias_na_fase": self.dias_na_fase(),
             "responsavel_fase_id": self.responsavel_fase_id,
             "responsavel_fase_nome": self.responsavel_fase.nome if self.responsavel_fase else "",
-            "funcionarios": [f.to_dict(include_funcoes=False) for f in self.funcionarios],
+            "funcionarios": [
+                {
+                    **f.to_dict(include_funcoes=False),
+                    "aprovado_em": aprovacao_map.get(f.id_func, None).isoformat() if aprovacao_map.get(f.id_func) else None,
+                }
+                for f in self.funcionarios
+            ],
+            "aprovacao": {
+                "aprovados": aprovados,
+                "total": total,
+                "todos_aprovaram": aprovados >= total if total > 0 else True,
+            },
         }
 
 

@@ -677,17 +677,31 @@ def api_mover_fase(oid):
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_concluir_fase(oid):
     o = Objeto.query.get_or_404(oid)
+    u = get_usuario_logado()
     etapas_list = parse_etapas(o.etapas_pre_definidas)
     if not etapas_list:
         return jsonify({"erro": "Este módulo não possui um fluxo de etapas pré-definido."}), 400
     
+    # Se é funcionário, redirecionar para a lógica de aprovação
+    if u.perfil == "funcionario":
+        fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+        if not fase_ativa:
+            return jsonify({"erro": "Nenhuma fase ativa para este módulo."}), 400
+        return _aprovar_fase_funcionario(fase_ativa, u, o)
+    
+    # Admin/Gestor: mover direto (override)
+    return _executar_mover_proxima_fase(o, etapas_list)
+
+
+def _executar_mover_proxima_fase(o, etapas_list):
+    """Lógica central de movimentação para a próxima fase do fluxo pré-definido."""
     etapas_ids = [e["fase_id"] for e in etapas_list]
+    oid = o.id
 
     fase_atual = o.fase_atual_id
     proxima_idx = None
     
     if fase_atual is None:
-        # Se estiver sem fase, move para a primeira da lista
         proxima_idx = 0
     else:
         idx = o.calcular_indice_fase_atual()
@@ -697,7 +711,6 @@ def api_concluir_fase(oid):
             else:
                 return jsonify({"erro": "Esta já é a última fase do fluxo pré-definido."}), 400
         else:
-            # Fase atual não está na lista. Inicia o fluxo pré-definido a partir da primeira.
             proxima_idx = 0
             
     proxima_etapa = etapas_list[proxima_idx]
@@ -712,7 +725,7 @@ def api_concluir_fase(oid):
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
     
-    # Determinar data_limite e responsável da nova fase (pré-definidos ou fallback)
+    # Determinar data_limite e responsável da nova fase
     data_limite_fase = None
     if proxima_etapa.get("data_limite"):
         try:
@@ -720,7 +733,7 @@ def api_concluir_fase(oid):
         except (ValueError, TypeError):
             data_limite_fase = None
     if not data_limite_fase:
-        data_limite_fase = o.data_limite  # Fallback: limite do objeto
+        data_limite_fase = o.data_limite
     
     responsavel_fase_id = proxima_etapa.get("funcionario_id") or o.responsavel_id
         
@@ -738,7 +751,7 @@ def api_concluir_fase(oid):
     if proxima_etapa.get("funcionario_id"):
         func_pre = Funcionario.query.get(proxima_etapa["funcionario_id"])
         if func_pre:
-            db.session.flush()  # Garante que of.id está disponível
+            db.session.flush()
             of.funcionarios.append(func_pre)
     
     db.session.commit()
@@ -793,7 +806,94 @@ def api_remover_funcionario_fase(of_id):
     if funcionario in of.funcionarios:
         of.funcionarios.remove(funcionario)
         db.session.commit()
+        
+        # Após remoção, verificar se todos os restantes já aprovaram
+        # e se há fluxo pré-definido para auto-mover
+        if of.data_saida is None and of.todos_aprovaram():
+            objeto = db.session.get(Objeto, of.objeto_id)
+            if objeto:
+                etapas_list = parse_etapas(objeto.etapas_pre_definidas)
+                if etapas_list and objeto.has_proxima_etapa():
+                    result = _executar_mover_proxima_fase(objeto, etapas_list)
+                    return result
+    
     return jsonify(of.to_dict())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  API: Aprovar fase (dupla aprovação)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/objeto-fase/<int:of_id>/aprovar", methods=["POST"])
+@requer_perfil_api("admin", "gestor", "funcionario")
+def api_aprovar_fase(of_id):
+    """Registra a aprovação individual de um funcionário na fase ativa."""
+    of = ObjetoFase.query.get_or_404(of_id)
+    u = get_usuario_logado()
+    
+    if of.data_saida is not None:
+        return jsonify({"erro": "Esta fase já foi encerrada."}), 400
+    
+    return _aprovar_fase_funcionario(of, u, None)
+
+
+def _aprovar_fase_funcionario(fase_ativa, usuario, objeto):
+    """Lógica de aprovação de um funcionário em uma fase."""
+    # Identificar o funcionário vinculado ao usuário
+    funcionario = usuario.funcionario
+    if not funcionario:
+        return jsonify({"erro": "Seu usuário não está vinculado a um funcionário."}), 400
+    
+    # Verificar se está atribuído à fase
+    if funcionario not in fase_ativa.funcionarios:
+        return jsonify({"erro": "Você não está atribuído a esta fase."}), 403
+    
+    # Verificar se já aprovou
+    if fase_ativa.funcionario_ja_aprovou(funcionario.id_func):
+        return jsonify({"erro": "Você já aprovou esta fase."}), 409
+    
+    # Registrar aprovação
+    db.session.execute(
+        objeto_fase_funcionario.update().where(
+            db.and_(
+                objeto_fase_funcionario.c.id_objeto_fase == fase_ativa.id,
+                objeto_fase_funcionario.c.id_funcionario == funcionario.id_func,
+            )
+        ).values(aprovado_em=datetime.utcnow())
+    )
+    db.session.commit()
+    
+    # Buscar o objeto se não fornecido
+    if objeto is None:
+        objeto = db.session.get(Objeto, fase_ativa.objeto_id)
+    
+    # Verificar se todos aprovaram
+    if fase_ativa.todos_aprovaram():
+        etapas_list = parse_etapas(objeto.etapas_pre_definidas)
+        if etapas_list and objeto.has_proxima_etapa():
+            result = _executar_mover_proxima_fase(objeto, etapas_list)
+            # Parse a resposta JSON para adicionar info de aprovação
+            return jsonify({
+                "aprovado": True,
+                "movido": True,
+                "objeto": objeto.to_dict(),
+            })
+        else:
+            return jsonify({
+                "aprovado": True,
+                "movido": False,
+                "mensagem": "Fase aprovada! Esta é a última fase do fluxo.",
+                "objeto": objeto.to_dict(),
+            })
+    
+    # Aprovação parcial
+    aprovados, total = fase_ativa.total_aprovacoes()
+    return jsonify({
+        "aprovado": True,
+        "movido": False,
+        "total_aprovacoes": f"{aprovados}/{total}",
+        "objeto": objeto.to_dict(),
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

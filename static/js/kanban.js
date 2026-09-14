@@ -131,13 +131,13 @@ function createCard(projeto) {
         
         // SLA de Fase Visual
         if (sf.dias_restantes > 2) {
-            card.style.backgroundColor = "rgba(144, 238, 144, 0.2)"; // verde claro mais transparente
+            card.style.backgroundColor = "rgba(144, 238, 144, 0.2)";
         } else if (sf.dias_restantes === 2) {
-            card.style.backgroundColor = "rgba(255, 255, 0, 0.2)"; // amarelo mais transparente
+            card.style.backgroundColor = "rgba(255, 255, 0, 0.2)";
         } else if (sf.dias_restantes === 1 || sf.dias_restantes === 0) {
-            card.style.backgroundColor = "rgba(255, 165, 0, 0.2)"; // laranja mais transparente
+            card.style.backgroundColor = "rgba(255, 165, 0, 0.2)";
         } else if (sf.dias_restantes < 0) {
-            card.style.backgroundColor = "rgba(255, 0, 0, 0.15)"; // vermelho mais transparente
+            card.style.backgroundColor = "rgba(255, 0, 0, 0.15)";
         }
     }
 
@@ -147,6 +147,44 @@ function createCard(projeto) {
     if (projeto.prioridade === 3) priorityBadge = '<span class="priority-badge priority-3">🔴 Urgente</span>';
     else if (projeto.prioridade === 2) priorityBadge = '<span class="priority-badge priority-2">🟠 Prioridade</span>';
     else if (projeto.prioridade === 1) priorityBadge = '<span class="priority-badge priority-1">🟡 Importante</span>';
+
+    // ── Aprovação (dupla aprovação) ──
+    const aprovacao = projeto.aprovacao || { aprovados: 0, total: 0, todos_aprovaram: true };
+    const aprovacaoFuncs = projeto.aprovacao_funcionarios || [];
+    const isMultiApproval = aprovacao.total > 1;
+    const myFuncId = currentUser?.funcionario_id;
+    const myApproval = aprovacaoFuncs.find(f => f.id === myFuncId);
+    const jaAprovei = myApproval?.aprovado_em != null;
+    const isEmployee = currentUser?.perfil === "funcionario";
+
+    let aprovacaoBadge = "";
+    if (isMultiApproval) {
+        const badgeColor = aprovacao.todos_aprovaram ? "#22c55e" : "#f59e0b";
+        aprovacaoBadge = `<div style="margin-top:6px;"><span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;border-radius:12px;background:${badgeColor}15;color:${badgeColor};font-weight:600;border:1px solid ${badgeColor}33;">🔒 ${aprovacao.aprovados}/${aprovacao.total} aprovados</span></div>`;
+    }
+
+    // Botão de ação
+    let actionButton = "";
+    if (hasProximaEtapa) {
+        if (isEmployee && isMultiApproval) {
+            if (jaAprovei) {
+                actionButton = `
+                    <div style="margin-top: 8px;">
+                        <button class="btn btn-sm" disabled style="width: 100%; background-color: #94a3b8; border-color: #94a3b8; color: white; cursor: not-allowed;">✅ Aprovado (${aprovacao.aprovados}/${aprovacao.total})</button>
+                    </div>`;
+            } else {
+                actionButton = `
+                    <div style="margin-top: 8px;">
+                        <button class="btn btn-primary btn-sm" onclick="aprovarFase(event, ${projeto.fase_ativa_id})" style="width: 100%; background-color: #f59e0b; border-color: #f59e0b; color: white;">✔ Aprovar Fase</button>
+                    </div>`;
+            }
+        } else {
+            actionButton = `
+                <div style="margin-top: 8px;">
+                    <button class="btn btn-primary btn-sm" onclick="concluirFasePreDefinida(event, ${projeto.id})" style="width: 100%; background-color: #22c55e; border-color: #22c55e; color: white;">✔ Concluído</button>
+                </div>`;
+        }
+    }
 
     card.innerHTML = `
         <div class="card-os">${projeto.projeto_os} <span style="font-size:0.8em; color:#64748b; font-weight:normal;">- ${projeto.nome}</span></div>
@@ -162,11 +200,8 @@ function createCard(projeto) {
         ${funcsFase.length > 0
             ? `<div class="card-responsavel">👤 ${funcsFase.join(", ")}</div>`
             : (projeto.responsavel_nome ? `<div class="card-responsavel">👤 ${projeto.responsavel_nome}</div>` : "")}
-        ${hasProximaEtapa ? `
-            <div style="margin-top: 8px;">
-                <button class="btn btn-primary btn-sm" onclick="concluirFasePreDefinida(event, ${projeto.id})" style="width: 100%; background-color: #22c55e; border-color: #22c55e; color: white;">✔ Concluído</button>
-            </div>
-        ` : ""}
+        ${aprovacaoBadge}
+        ${actionButton}
     `;
 
     // Click to open detail
@@ -192,11 +227,41 @@ async function concluirFasePreDefinida(event, projetoId) {
     });
 
     if (res.ok) {
-        showToast("Fase concluída e movida com sucesso!", "success");
+        const data = await res.json();
+        if (data.movido) {
+            showToast("Fase concluída e movida com sucesso!", "success");
+        } else if (data.aprovado) {
+            showToast(`Aprovação registrada! (${data.total_aprovacoes || 'Completa'})`, "success");
+        } else {
+            showToast("Fase concluída!", "success");
+        }
         await loadBoard();
     } else {
         const err = await res.json();
         showToast(err.erro || "Erro ao concluir fase", "error");
+    }
+}
+
+// ─── Aprovar Fase (dupla aprovação) ──────────────────────────────────────────
+async function aprovarFase(event, faseAtivaId) {
+    event.stopPropagation();
+    if (!confirm("Confirmar sua aprovação desta fase?")) return;
+    
+    const res = await fetch(`/api/objeto-fase/${faseAtivaId}/aprovar`, {
+        method: "POST"
+    });
+
+    if (res.ok) {
+        const data = await res.json();
+        if (data.movido) {
+            showToast("Todos aprovaram! Card movido para a próxima fase.", "success");
+        } else {
+            showToast(`Aprovação registrada! (${data.total_aprovacoes || 'Completa'})`, "success");
+        }
+        await loadBoard();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao aprovar", "error");
     }
 }
 
@@ -882,12 +947,15 @@ async function openDetail(objetoId) {
                     ${h.funcionarios.length > 0 ? `
                         <div style="margin-top:8px;">
                             <span class="detail-label">Equipe:</span>
+                            ${isActive && h.aprovacao && h.aprovacao.total > 1 ? `<span style="font-size:12px;margin-left:8px;padding:2px 8px;border-radius:10px;background:${h.aprovacao.todos_aprovaram ? '#22c55e' : '#f59e0b'}15;color:${h.aprovacao.todos_aprovaram ? '#22c55e' : '#f59e0b'};font-weight:600;">🔒 ${h.aprovacao.aprovados}/${h.aprovacao.total} aprovados</span>` : ""}
                             <div class="team-chips" style="margin-top:4px;">
                                 ${h.funcionarios.map(f => {
+                                    const aprovIcon = f.aprovado_em ? '✅' : '⏳';
+                                    const aprovTitle = f.aprovado_em ? `Aprovado em ${formatDateTime(f.aprovado_em)}` : 'Aprovação pendente';
                                     if (isActive && ["admin", "gestor"].includes(currentUser?.perfil)) {
-                                        return `<span class="team-chip" style="display:inline-flex;align-items:center;gap:4px;">${f.nome} <button onclick="removerFuncionarioFaseAtiva(event, ${h.id}, ${f.id})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:0 2px;line-height:1;" title="Remover">✕</button></span>`;
+                                        return `<span class="team-chip" style="display:inline-flex;align-items:center;gap:4px;" title="${aprovTitle}">${aprovIcon} ${f.nome} <button onclick="removerFuncionarioFaseAtiva(event, ${h.id}, ${f.id})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:0 2px;line-height:1;" title="Remover">✕</button></span>`;
                                     }
-                                    return `<span class="team-chip">${f.nome}</span>`;
+                                    return `<span class="team-chip" title="${aprovTitle}">${aprovIcon} ${f.nome}</span>`;
                                 }).join("")}
                             </div>
                         </div>
