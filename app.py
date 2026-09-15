@@ -482,6 +482,21 @@ def api_criar_projeto():
         nome_obj = obj_data.get("nome", "").strip() or "Módulo 1"
 
         etapas = obj_data.get("etapas_pre_definidas")
+        # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
+        if isinstance(etapas, list) and fase_id:
+            if not etapas or etapas[0].get("fase_id") != fase_id:
+                etapa_inicial = {
+                    "fase_id": fase_id,
+                    "data_limite": obj_data_limite_str or None,
+                    "funcionario_id": obj_data.get("responsavel_id") or None,
+                }
+                etapas.insert(0, etapa_inicial)
+        elif fase_id and not etapas:
+            etapas = [{
+                "fase_id": fase_id,
+                "data_limite": obj_data_limite_str or None,
+                "funcionario_id": obj_data.get("responsavel_id") or None,
+            }]
         etapas_str = serialize_etapas(etapas) if isinstance(etapas, list) else None
 
         novo_obj = Objeto(
@@ -588,6 +603,21 @@ def api_criar_objeto(pid):
     responsavel_id = body.get("responsavel_id", p.responsavel_id)
 
     etapas = body.get("etapas_pre_definidas")
+    # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
+    if isinstance(etapas, list) and fase_id:
+        if not etapas or etapas[0].get("fase_id") != fase_id:
+            etapa_inicial = {
+                "fase_id": fase_id,
+                "data_limite": data_limite_str or None,
+                "funcionario_id": responsavel_id or None,
+            }
+            etapas.insert(0, etapa_inicial)
+    elif fase_id and not etapas:
+        etapas = [{
+            "fase_id": fase_id,
+            "data_limite": data_limite_str or None,
+            "funcionario_id": responsavel_id or None,
+        }]
     etapas_str = serialize_etapas(etapas) if isinstance(etapas, list) else None
 
     novo_obj = Objeto(
