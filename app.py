@@ -988,6 +988,45 @@ def api_reatribuir_fase(oid):
 #  API: Kanban board data
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def calcular_relacao_funcionario(objeto, func_id):
+    """Calcula as relações de um funcionário com um card/objeto.
+    
+    Retorna lista de strings: 'pendente', 'concluido', 'futuro'
+    """
+    relacoes = set()
+    
+    # 1. Verificar se está na fase ativa
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=objeto.id, data_saida=None).first()
+    if fase_ativa:
+        func_ids_fase = [f.id_func for f in fase_ativa.funcionarios]
+        if func_id in func_ids_fase:
+            if fase_ativa.funcionario_ja_aprovou(func_id):
+                relacoes.add("concluido")
+            else:
+                relacoes.add("pendente")
+    
+    # 2. Verificar fases passadas (concluído)
+    fases_passadas = ObjetoFase.query.filter(
+        ObjetoFase.objeto_id == objeto.id,
+        ObjetoFase.data_saida.isnot(None)
+    ).all()
+    for fp in fases_passadas:
+        if func_id in [f.id_func for f in fp.funcionarios]:
+            relacoes.add("concluido")
+            break
+    
+    # 3. Verificar etapas futuras no roadmap
+    etapas = parse_etapas(objeto.etapas_pre_definidas)
+    if etapas:
+        idx = objeto.calcular_indice_fase_atual()
+        etapas_futuras = etapas[idx + 1:] if idx != -1 else etapas
+        for e in etapas_futuras:
+            if e.get("funcionario_id") == func_id:
+                relacoes.add("futuro")
+                break
+    
+    return list(relacoes) if relacoes else []
+
 @app.route("/api/kanban", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_kanban():
@@ -995,15 +1034,51 @@ def api_kanban():
     u = get_usuario_logado()
     fases = Fase.query.filter(db.or_(Fase.ativa == True, Fase.ativa == None)).order_by(Fase.ordem).all()
     
+    # Determinar func_id para cálculo de relação
+    relacao_func_id = None
+    if u.perfil == "funcionario" and u.funcionario:
+        relacao_func_id = u.funcionario.id_func
+    else:
+        # Admin/Gestor pode solicitar relação de um funcionário específico
+        rfid = request.args.get("relacao_func_id")
+        if rfid:
+            try:
+                relacao_func_id = int(rfid)
+            except (ValueError, TypeError):
+                pass
+    
     objetos_query = Objeto.query
     if u.perfil == "funcionario" and u.funcionario:
         func_id = u.funcionario.id_func
-        objetos_query = objetos_query.join(ObjetoFase).join(
+        
+        # Query 1: Cards onde o funcionário está atribuído em qualquer fase
+        assigned_ids = db.session.query(Objeto.id).join(ObjetoFase).join(
             objeto_fase_funcionario,
             objeto_fase_funcionario.c.id_objeto_fase == ObjetoFase.id,
         ).filter(
             objeto_fase_funcionario.c.id_funcionario == func_id
-        ).distinct()
+        ).distinct().all()
+        assigned_ids = {r[0] for r in assigned_ids}
+        
+        # Query 2: Cards onde o funcionário está no roadmap futuro
+        roadmap_candidates = Objeto.query.filter(
+            Objeto.etapas_pre_definidas.isnot(None),
+            Objeto.etapas_pre_definidas != ''
+        ).all()
+        roadmap_ids = set()
+        for o in roadmap_candidates:
+            etapas = parse_etapas(o.etapas_pre_definidas)
+            for e in etapas:
+                if e.get("funcionario_id") == func_id:
+                    roadmap_ids.add(o.id)
+                    break
+        
+        # Combinar
+        all_ids = assigned_ids | roadmap_ids
+        if all_ids:
+            objetos_query = Objeto.query.filter(Objeto.id.in_(all_ids))
+        else:
+            objetos_query = Objeto.query.filter(db.literal(False))
     
     objetos = objetos_query.all()
     
@@ -1012,17 +1087,23 @@ def api_kanban():
     for fase in fases:
         board[fase.id_fase] = {
             **fase.to_dict(include_funcoes=False),
-            "projetos": [], # Mantemos a chave "projetos" por compatibilidade com JS (ou mudamos para objetos no JS)
+            "projetos": [],
             "objetos": [],
         }
     board["sem_fase"] = {"id": None, "nome": "Sem Fase", "cor": "#94a3b8", "ordem": -1, "projetos": [], "objetos": []}
     
     for o in objetos:
         key = o.fase_atual_id if o.fase_atual_id and o.fase_atual_id in board else "sem_fase"
-        board[key]["objetos"].append(o.to_dict())
-        # Alias "projetos" = "objetos" pra evitar quebrar o JS imediatamente, 
-        # embora o ideal seja renomear no frontend.
-        board[key]["projetos"].append(o.to_dict())
+        obj_dict = o.to_dict()
+        
+        # Adicionar relação do funcionário se solicitado
+        if relacao_func_id:
+            obj_dict["relacao_funcionario"] = calcular_relacao_funcionario(o, relacao_func_id)
+        else:
+            obj_dict["relacao_funcionario"] = None
+        
+        board[key]["objetos"].append(obj_dict)
+        board[key]["projetos"].append(obj_dict)
         
     return jsonify(list(board.values()))
 

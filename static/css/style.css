@@ -1032,6 +1032,124 @@ input[type="color"] {
     to { transform: translateX(0); opacity: 1; }
 }
 
+/* ─── View Toggle ────────────────────────────────────────────────────── */
+
+.view-toggle {
+    display: inline-flex;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.view-toggle-btn {
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition);
+    font-family: var(--font);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.view-toggle-btn:hover {
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+}
+
+.view-toggle-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
+/* ─── Kanban Horizontal Layout ───────────────────────────────────────── */
+
+.kanban-board.horizontal {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    gap: 12px;
+    padding: 16px 24px;
+}
+
+.kanban-board.horizontal .kanban-column {
+    min-width: 100%;
+    max-width: 100%;
+    max-height: none;
+    flex-shrink: 1;
+    border-radius: var(--radius);
+}
+
+.kanban-board.horizontal .column-header {
+    padding: 10px 16px;
+}
+
+.kanban-board.horizontal .column-body {
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-y: visible;
+    overflow-x: auto;
+    padding: 12px;
+    gap: 12px;
+    max-height: none;
+}
+
+.kanban-board.horizontal .project-card {
+    width: 300px;
+    min-width: 280px;
+    max-width: 340px;
+    flex-shrink: 0;
+    flex-grow: 0;
+}
+
+.kanban-board.horizontal .empty-state {
+    width: 100%;
+    padding: 20px;
+    flex-direction: row;
+    gap: 10px;
+}
+
+.kanban-board.horizontal .empty-state-icon {
+    font-size: 24px;
+    margin-bottom: 0;
+}
+
+/* ─── Filter Relationship Badge ──────────────────────────────────────── */
+
+.relacao-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-right: 4px;
+}
+
+.relacao-pendente {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.relacao-futuro {
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.relacao-concluido {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────── */
 
 @media (max-width: 768px) {
@@ -1044,4 +1162,6 @@ input[type="color"] {
     .sidebar-link::first-letter { font-size: 14px; }
     .admin-content { padding: 16px; }
     .detail-grid { grid-template-columns: 1fr; }
+    .kanban-board.horizontal .project-card { width: 100%; max-width: 100%; min-width: 100%; }
+    .kanban-board.horizontal .column-body { flex-wrap: wrap; }
 }

@@ -5,6 +5,10 @@
 <div class="kanban-toolbar" id="kanban-toolbar">
     <div class="toolbar-left">
         <h1 class="page-title">Board de Projetos</h1>
+        <div class="view-toggle" id="view-toggle">
+            <button class="view-toggle-btn active" data-view="vertical" id="btn-view-vertical" title="Visualização em Colunas">▐▐ Colunas</button>
+            <button class="view-toggle-btn" data-view="horizontal" id="btn-view-horizontal" title="Visualização em Linhas">☰ Linhas</button>
+        </div>
     </div>
     <div class="toolbar-right">
         <input type="text" class="input-search" id="kanban-search" placeholder="Buscar por OS, cliente...">
@@ -22,6 +26,14 @@
             <option value="1">🟡 Importante</option>
             <option value="2">🟠 Prioridade</option>
             <option value="3">🔴 Urgente</option>
+        </select>
+        <select class="input-select" id="kanban-filter-relacao">
+            <option value="">Meus Cards</option>
+            <option value="todos">📋 Todos os cards</option>
+            <option value="pendentes">⏳ Pendentes</option>
+            <option value="concluidos">✅ Concluídos</option>
+            <option value="futuros">🔮 Futuros</option>
+            <option value="pendentes_futuros">📌 Pendentes e futuros</option>
         </select>
         <button class="btn btn-ghost" id="btn-historico">Ver Histórico</button>
         <button class="btn btn-primary" id="btn-novo-projeto" style="display:none;">+ Novo Projeto</button>

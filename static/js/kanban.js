@@ -7,6 +7,7 @@ let boardData = [];
 let allFuncoes = [];
 let allFuncionarios = [];
 let allFases = [];
+let currentViewMode = "vertical"; // "vertical" or "horizontal"
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -32,7 +33,17 @@ async function loadUser() {
 }
 
 async function loadBoard() {
-    const res = await fetch("/api/kanban");
+    // Build URL with optional relacao_func_id for admin/gestor
+    let url = "/api/kanban";
+    if (["admin", "gestor"].includes(currentUser?.perfil)) {
+        const funcFilter = document.getElementById("kanban-filter-funcionario")?.value;
+        if (funcFilter) {
+            // Find the funcionario ID by name
+            const func = allFuncionarios.find(f => f.nome === funcFilter);
+            if (func) url += `?relacao_func_id=${func.id}`;
+        }
+    }
+    const res = await fetch(url);
     if (!res.ok) return;
     boardData = await res.json();
     renderBoard(boardData);
@@ -53,6 +64,12 @@ async function loadSelectData() {
 function renderBoard(data) {
     const board = document.getElementById("kanban-board");
     board.innerHTML = "";
+
+    // Apply view mode class
+    board.classList.remove("horizontal");
+    if (currentViewMode === "horizontal") {
+        board.classList.add("horizontal");
+    }
 
     // Sort by ordem
     data.sort((a, b) => (a.ordem ?? 999) - (b.ordem ?? 999));
@@ -113,6 +130,9 @@ function createCard(projeto) {
     // Phase-level funcionários for filtering
     const funcsFase = (projeto.funcionarios_fase_atual || []).map(f => f.nome);
     card.dataset.funcionariosFase = funcsFase.join(",");
+    // Relationship data for filtering (pendente, concluido, futuro)
+    const relacao = projeto.relacao_funcionario || [];
+    card.dataset.relacaoFuncionario = relacao.join(",");
     card.draggable = ["admin", "gestor"].includes(currentUser?.perfil);
 
     const sla = projeto.sla || {};
@@ -201,6 +221,12 @@ function createCard(projeto) {
             ? `<div class="card-responsavel">👤 ${funcsFase.join(", ")}</div>`
             : (projeto.responsavel_nome ? `<div class="card-responsavel">👤 ${projeto.responsavel_nome}</div>` : "")}
         ${aprovacaoBadge}
+        ${relacao.length > 0 ? `<div style="margin-top:4px;">${relacao.map(r => {
+            if (r === "pendente") return '<span class="relacao-badge relacao-pendente">⏳ Pendente</span>';
+            if (r === "concluido") return '<span class="relacao-badge relacao-concluido">✅ Concluído</span>';
+            if (r === "futuro") return '<span class="relacao-badge relacao-futuro">🔮 Futuro</span>';
+            return '';
+        }).join('')}</div>` : ''}
         ${actionButton}
     `;
 
@@ -401,11 +427,31 @@ function setupToolbar() {
     document.getElementById("kanban-filter-sla").addEventListener("change", () => {
         filterBoard();
     });
-    document.getElementById("kanban-filter-funcionario").addEventListener("change", () => {
+    document.getElementById("kanban-filter-funcionario").addEventListener("change", async () => {
+        // For admin/gestor: reload board with relacao_func_id to get relationship data
+        if (["admin", "gestor"].includes(currentUser?.perfil)) {
+            await loadBoard();
+        }
         filterBoard();
     });
     document.getElementById("kanban-filter-prioridade").addEventListener("change", () => {
         filterBoard();
+    });
+    document.getElementById("kanban-filter-relacao")?.addEventListener("change", () => {
+        filterBoard();
+    });
+
+    // View toggle
+    document.querySelectorAll(".view-toggle-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const newMode = btn.dataset.view;
+            if (newMode === currentViewMode) return;
+            currentViewMode = newMode;
+            document.querySelectorAll(".view-toggle-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            renderBoard(boardData);
+            filterBoard();
+        });
     });
 }
 
@@ -414,6 +460,7 @@ function filterBoard() {
     const slaFilter = document.getElementById("kanban-filter-sla").value;
     const funcFilter = document.getElementById("kanban-filter-funcionario").value;
     const prioFilter = document.getElementById("kanban-filter-prioridade").value;
+    const relacaoFilter = document.getElementById("kanban-filter-relacao")?.value || "";
     const cards = document.querySelectorAll(".project-card");
 
     cards.forEach(card => {
@@ -430,7 +477,13 @@ function filterBoard() {
         let matchFunc = true;
         if (funcFilter) {
             const funcionariosFase = card.dataset.funcionariosFase || "";
-            matchFunc = funcionariosFase.split(",").includes(funcFilter);
+            const relacaoData = card.dataset.relacaoFuncionario || "";
+            // For admin/gestor with relationship data, show cards where the employee has any relationship
+            if (relacaoData) {
+                matchFunc = relacaoData.length > 0;
+            } else {
+                matchFunc = funcionariosFase.split(",").includes(funcFilter);
+            }
         }
 
         let matchPrio = true;
@@ -438,7 +491,37 @@ function filterBoard() {
             matchPrio = card.dataset.prioridade === prioFilter;
         }
 
-        card.style.display = (matchQuery && matchSla && matchFunc && matchPrio) ? "" : "none";
+        // Relationship filter
+        let matchRelacao = true;
+        if (relacaoFilter) {
+            const relacaoData = card.dataset.relacaoFuncionario || "";
+            const relacoes = relacaoData ? relacaoData.split(",").filter(r => r) : [];
+            
+            if (relacoes.length === 0) {
+                // No relationship data — show all when "todos", hide for specific filters
+                matchRelacao = (relacaoFilter === "todos");
+            } else {
+                switch (relacaoFilter) {
+                    case "todos":
+                        matchRelacao = relacoes.length > 0;
+                        break;
+                    case "pendentes":
+                        matchRelacao = relacoes.includes("pendente");
+                        break;
+                    case "concluidos":
+                        matchRelacao = relacoes.includes("concluido");
+                        break;
+                    case "futuros":
+                        matchRelacao = relacoes.includes("futuro");
+                        break;
+                    case "pendentes_futuros":
+                        matchRelacao = relacoes.includes("pendente") || relacoes.includes("futuro");
+                        break;
+                }
+            }
+        }
+
+        card.style.display = (matchQuery && matchSla && matchFunc && matchPrio && matchRelacao) ? "" : "none";
     });
 
     updateColumnCounts();
