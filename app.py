@@ -1385,27 +1385,26 @@ def migrate_prod_command():
 def debug_db():
     try:
         from sqlalchemy import text
+        from models import Objeto, Fase, db
         db_url = app.config.get("SQLALCHEMY_DATABASE_URI", "None")
         projetos_count = db.session.execute(text("SELECT COUNT(*) FROM projetos")).scalar()
         objetos_count = db.session.execute(text("SELECT COUNT(*) FROM objetos")).scalar()
-        os_type = "unknown"
-        try:
-            if "mysql" in db_url:
-                res = db.session.execute(text("SHOW COLUMNS FROM projetos WHERE Field = \"os\"")).fetchone()
-                os_type = res[1] if res else "not found"
-        except Exception as e:
-            os_type = str(e)
         
-        safe_url = db_url
-        if "@" in safe_url:
-            parts = safe_url.split("@")
-            safe_url = "xxxxx@" + parts[1]
+        err_kanban = "None"
+        try:
+            o = Objeto.query.first()
+            if o:
+                o.to_dict()
+        except Exception as e:
+            import traceback
+            err_kanban = traceback.format_exc()
             
         return jsonify({
-            "database_url": safe_url,
+            "database_url": db_url,
             "projetos_count": projetos_count,
             "objetos_count": objetos_count,
-            "os_type": os_type
+            "err_kanban": err_kanban
         })
     except Exception as e:
-        return jsonify({"erro": str(e)})
+        import traceback
+        return jsonify({"erro": traceback.format_exc()})
