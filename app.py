@@ -1325,3 +1325,58 @@ with app.app_context():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, use_reloader=False)
+
+@app.cli.command("migrate-prod")
+def migrate_prod_command():
+    """Migra dados da tabela projetos para objetos em produção (MySQL)."""
+    from sqlalchemy import text
+    print("Iniciando migração de projetos para objetos...")
+    
+    projetos = Projeto.query.all()
+    if not projetos:
+        print("Nenhum projeto encontrado. Nada a migrar.")
+        return
+
+    migrados = 0
+    for p in projetos:
+        obj = Objeto.query.filter_by(projeto_id=p.projeto_id).first()
+        if obj:
+            continue
+
+        nome_objeto = p.nome or "Objeto Único"
+        fase_atual_id = None
+        
+        try:
+            # Tenta ler colunas antigas via SQL puro
+            result = db.session.execute(text("SELECT atividade, fase_atual_id FROM projetos WHERE projeto_id = :pid"), {"pid": p.projeto_id}).fetchone()
+            if result:
+                if result[0]:
+                    nome_objeto = result[0]
+                if result[1]:
+                    fase_atual_id = result[1]
+        except Exception:
+            db.session.rollback()
+            
+        novo_obj = Objeto(
+            projeto_id=p.projeto_id,
+            nome=nome_objeto[:200],
+            descricao=p.descricao,
+            data_limite=p.data_limite,
+            responsavel_id=p.responsavel_id,
+            fase_atual_id=fase_atual_id
+        )
+        db.session.add(novo_obj)
+        migrados += 1
+        
+    # Copia comentários
+    try:
+        db.session.execute(text("UPDATE comentarios SET objeto_id = projeto_id WHERE objeto_id IS NULL AND projeto_id IS NOT NULL"))
+    except Exception:
+        db.session.rollback()
+        
+    try:
+        db.session.commit()
+        print(f"Migração concluída! {migrados} objetos criados.")
+    except Exception as e:
+        db.session.rollback()
+        print(f"Erro ao salvar: {e}")
