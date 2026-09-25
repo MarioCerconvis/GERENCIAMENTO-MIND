@@ -1380,3 +1380,32 @@ def migrate_prod_command():
     except Exception as e:
         db.session.rollback()
         print(f"Erro ao salvar: {e}")
+
+@app.route("/api/debug-db")
+def debug_db():
+    try:
+        from sqlalchemy import text
+        db_url = app.config.get("SQLALCHEMY_DATABASE_URI", "None")
+        projetos_count = db.session.execute(text("SELECT COUNT(*) FROM projetos")).scalar()
+        objetos_count = db.session.execute(text("SELECT COUNT(*) FROM objetos")).scalar()
+        os_type = "unknown"
+        try:
+            if "mysql" in db_url:
+                res = db.session.execute(text("SHOW COLUMNS FROM projetos WHERE Field = \"os\"")).fetchone()
+                os_type = res[1] if res else "not found"
+        except Exception as e:
+            os_type = str(e)
+        
+        safe_url = db_url
+        if "@" in safe_url:
+            parts = safe_url.split("@")
+            safe_url = "xxxxx@" + parts[1]
+            
+        return jsonify({
+            "database_url": safe_url,
+            "projetos_count": projetos_count,
+            "objetos_count": objetos_count,
+            "os_type": os_type
+        })
+    except Exception as e:
+        return jsonify({"erro": str(e)})
