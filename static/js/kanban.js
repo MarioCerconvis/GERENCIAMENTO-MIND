@@ -575,7 +575,7 @@ function setupEventListeners() {
     // Close modals on overlay click
     document.querySelectorAll(".modal-overlay").forEach(overlay => {
         overlay.addEventListener("click", (e) => {
-            if (e.target === overlay) overlay.style.display = "none";
+            if (e.target === overlay) fecharModal(overlay.id);
         });
     });
 }
@@ -805,7 +805,7 @@ async function saveProject() {
     });
 
     if (res.ok) {
-        fecharModal("modal-projeto");
+        fecharModal("modal-projeto", true);
         showToast(id ? "OS atualizada!" : "OS criada com sucesso!", "success");
         await loadBoard();
     } else {
@@ -1360,7 +1360,14 @@ async function onRoadmapFaseChange(selectEl, faseId) {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function abrirModal(id) { document.getElementById(id).style.display = "flex"; }
-function fecharModal(id) { document.getElementById(id).style.display = "none"; }
+function fecharModal(id, force = false) {
+    if (id === "modal-projeto" && !force) {
+        if (!confirm("Quer sair mesmo? Você perderá o escrito até então.")) {
+            return;
+        }
+    }
+    document.getElementById(id).style.display = "none";
+}
 
 function formatDate(iso) {
     if (!iso) return "—";
