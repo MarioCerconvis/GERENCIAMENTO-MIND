@@ -1362,11 +1362,30 @@ async function onRoadmapFaseChange(selectEl, faseId) {
 function abrirModal(id) { document.getElementById(id).style.display = "flex"; }
 function fecharModal(id, force = false) {
     if (id === "modal-projeto" && !force) {
-        if (!confirm("Quer sair mesmo? Você perderá o escrito até então.")) {
-            return;
+        // Verifica se há algo digitado para evitar prompts desnecessários se estiver vazio
+        const os = document.getElementById("proj-os")?.value.trim();
+        const nome = document.getElementById("proj-nome")?.value.trim();
+        
+        if (os || nome) {
+            if (!confirm("Quer sair mesmo? Você perderá o escrito até então.")) {
+                return;
+            }
         }
     }
-    document.getElementById(id).style.display = "none";
+    
+    if (id === "modal-detalhe" && !force) {
+        const commentBox = document.getElementById("novo-comentario");
+        if (commentBox && commentBox.value.trim() !== "") {
+            if (!confirm("Você tem um comentário não salvo. Quer sair mesmo?")) {
+                return;
+            }
+        }
+    }
+
+    const modal = document.getElementById(id);
+    if (modal) {
+        modal.style.display = "none";
+    }
 }
 
 function formatDate(iso) {
