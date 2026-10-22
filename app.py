@@ -13,6 +13,7 @@ from models import (
 from auth import get_usuario_logado, requer_login, requer_perfil, requer_perfil_api, get_abas_usuario
 from notifications import notificar_atribuicao, notificar_mudanca_fase
 from sla_checker import verificar_sla_projetos
+from schema import ensure_schema
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ bcrypt = Bcrypt(app)
 
 with app.app_context():
     db.create_all()
+    ensure_schema()
 
 # ─── SLA Scheduler ────────────────────────────────────────────────────────────
 
@@ -483,14 +485,17 @@ def api_criar_projeto():
 
         try:
             etapas = normalizar_etapas(obj_data.get("etapas_pre_definidas"))
+            obj_data_inicio = datas_do_modulo(obj_data.get("data_inicio"), obj_data_limite)
         except RoadmapInvalido as e:
             db.session.rollback()
             return jsonify({"erro": f"Módulo '{nome_obj}': {e}"}), 400
+        obj_data_inicio_str = obj_data_inicio.isoformat() if obj_data_inicio else None
         # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
         if isinstance(etapas, list) and fase_id:
             if not etapas or etapas[0].get("fase_id") != fase_id:
                 etapa_inicial = {
                     "fase_id": fase_id,
+                    "data_inicio": obj_data_inicio_str,
                     "data_limite": obj_data_limite_str or None,
                     "funcionario_id": obj_data.get("responsavel_id") or None,
                 }
@@ -498,6 +503,7 @@ def api_criar_projeto():
         elif fase_id and not etapas:
             etapas = [{
                 "fase_id": fase_id,
+                "data_inicio": obj_data_inicio_str,
                 "data_limite": obj_data_limite_str or None,
                 "funcionario_id": obj_data.get("responsavel_id") or None,
             }]
@@ -508,6 +514,7 @@ def api_criar_projeto():
             nome=nome_obj,
             descricao=obj_data.get("descricao", ""),
             data_limite=obj_data_limite,
+            data_inicio=obj_data_inicio,
             responsavel_id=obj_data.get("responsavel_id", novo_proj.responsavel_id),
             fase_atual_id=fase_id,
             etapas_pre_definidas=etapas_str
@@ -569,6 +576,14 @@ def _data_iso_ou_none(valor, rotulo):
         raise RoadmapInvalido(f"{rotulo}: data inválida ({valor}).")
 
 
+def datas_do_modulo(data_inicio_str, data_limite):
+    """Converte e valida a data de início prevista do módulo (opcional, <= data limite)."""
+    data_inicio = date.fromisoformat(_data_iso_ou_none(data_inicio_str, "Início previsto")) if data_inicio_str else None
+    if data_inicio and data_limite and data_inicio > data_limite:
+        raise RoadmapInvalido("O início previsto do módulo não pode ser depois da data limite.")
+    return data_inicio
+
+
 def normalizar_etapas(etapas):
     """Valida e padroniza a lista de etapas recebida da UI.
 
@@ -609,9 +624,15 @@ def normalizar_etapas(etapas):
                     )
             func_id = func.id_func
 
+        data_inicio = _data_iso_ou_none(etapa.get("data_inicio"), f"Etapa {i}")
+        data_limite = _data_iso_ou_none(etapa.get("data_limite"), f"Etapa {i}")
+        if data_inicio and data_limite and data_inicio > data_limite:
+            raise RoadmapInvalido(f"Etapa {i} ({fase.nome_fase}): o início previsto é depois do prazo previsto.")
+
         resultado.append({
             "fase_id": fase.id_fase,
-            "data_limite": _data_iso_ou_none(etapa.get("data_limite"), f"Etapa {i}"),
+            "data_inicio": data_inicio,
+            "data_limite": data_limite,
             "funcionario_id": func_id,
         })
     return resultado
@@ -663,8 +684,16 @@ def api_editar_objeto(oid):
         o.nome = body["nome"].strip()
     if "descricao" in body:
         o.descricao = body["descricao"].strip()
-    if "data_limite" in body:
-        o.data_limite = date.fromisoformat(body["data_limite"])
+    try:
+        if "data_limite" in body and body["data_limite"]:
+            o.data_limite = date.fromisoformat(body["data_limite"])
+        if "data_inicio" in body:
+            o.data_inicio = datas_do_modulo(body["data_inicio"], o.data_limite)
+        elif o.data_inicio and o.data_limite and o.data_inicio > o.data_limite:
+            raise RoadmapInvalido("O início previsto do módulo não pode ser depois da data limite.")
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e) if isinstance(e, RoadmapInvalido) else "Data limite inválida."}), 400
     if "responsavel_id" in body:
         o.responsavel_id = body["responsavel_id"]
     if "etapas_pre_definidas" in body:
@@ -711,6 +740,7 @@ def api_criar_objeto(pid):
 
     try:
         etapas = normalizar_etapas(body.get("etapas_pre_definidas"))
+        data_inicio = datas_do_modulo(body.get("data_inicio"), data_limite)
     except RoadmapInvalido as e:
         return jsonify({"erro": str(e)}), 400
     # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
@@ -718,6 +748,7 @@ def api_criar_objeto(pid):
         if not etapas or etapas[0].get("fase_id") != fase_id:
             etapa_inicial = {
                 "fase_id": fase_id,
+                "data_inicio": data_inicio.isoformat() if data_inicio else None,
                 "data_limite": data_limite_str or None,
                 "funcionario_id": responsavel_id or None,
             }
@@ -725,6 +756,7 @@ def api_criar_objeto(pid):
     elif fase_id and not etapas:
         etapas = [{
             "fase_id": fase_id,
+            "data_inicio": data_inicio.isoformat() if data_inicio else None,
             "data_limite": data_limite_str or None,
             "funcionario_id": responsavel_id or None,
         }]
@@ -735,6 +767,7 @@ def api_criar_objeto(pid):
         nome=nome,
         descricao=body.get("descricao", ""),
         data_limite=data_limite,
+        data_inicio=data_inicio,
         responsavel_id=responsavel_id,
         fase_atual_id=fase_id,
         etapas_pre_definidas=etapas_str
@@ -1388,10 +1421,17 @@ def api_historico_atividade(os_code):
                             data_esperada = dt.strftime("%d/%m/%Y")
                         except (ValueError, TypeError):
                             pass
+                    inicio_esperado = None
+                    if etapa.get("data_inicio"):
+                        try:
+                            inicio_esperado = date.fromisoformat(etapa["data_inicio"]).strftime("%d/%m/%Y")
+                        except (ValueError, TypeError):
+                            pass
                     
                     eventos.append({
                         "tipo": "fase_futura",
                         "data_str": data_esperada,
+                        "inicio_str": inicio_esperado,
                         "fase_nome": f.nome_fase,
                         "fase_cor": f.cor,
                         "responsavel": func_nome,

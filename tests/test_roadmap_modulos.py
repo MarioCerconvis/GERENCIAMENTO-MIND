@@ -55,7 +55,8 @@ class RoadmapModulosTest(unittest.TestCase):
         self.assertEqual(res.status_code, 200, res.get_json())
         etapas = self.admin.get(f"/api/objetos/{oid}").get_json()["etapas_pre_definidas"]
         self.assertEqual([e["fase_id"] for e in etapas], [self.revisao, self.layout, self.correcao, self.envio])
-        self.assertEqual(etapas[2], {"fase_id": self.correcao, "funcionario_id": self.renato, "data_limite": "2030-01-10"})
+        self.assertEqual(etapas[2], {"fase_id": self.correcao, "funcionario_id": self.renato,
+                                     "data_inicio": None, "data_limite": "2030-01-10"})
 
         # Concluir a fase atual segue o roadmap editado
         res = self.admin.post(f"/api/objetos/{oid}/concluir-fase")
@@ -86,7 +87,7 @@ class RoadmapModulosTest(unittest.TestCase):
             self.etapa(self.layout), self.etapa(self.envio),
         ])
         etapas = self.admin.get(f"/api/objetos/{oid}").get_json()["etapas_pre_definidas"]
-        self.assertEqual(etapas[0], {"fase_id": self.revisao, "funcionario_id": None, "data_limite": None})
+        self.assertEqual(etapas[0], {"fase_id": self.revisao, "funcionario_id": None, "data_inicio": None, "data_limite": None})
 
     def test_validacoes_de_etapa(self):
         _, oid = self.novo_modulo_em_andamento()

@@ -1398,3 +1398,40 @@ input[type="color"] {
     .rm-etapa-acoes { margin-left: auto; }
     .rm-painel-rodape { flex-wrap: wrap; }
 }
+
+/* ─── Datas de início previstas ──────────────────────────────────────── */
+
+.inicio-alerta {
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 6px;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    line-height: 1.4;
+}
+
+.inicio-aguardando {
+    background: var(--accent-subtle);
+    color: var(--accent-hover);
+}
+
+.inicio-atrasado {
+    background: var(--warning-bg);
+    color: var(--warning);
+}
+
+.rm-datas-modulo {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 220px));
+    gap: 12px;
+    margin: 8px 0 12px;
+}
+
+.rm-datas-modulo input[type="date"] { width: 100%; }
+
+/* Etapa editável com início e prazo: grade 2x2 (fase | funcionário / início | prazo) */
+.rm-etapa:not(.travada) .rm-etapa-campos { grid-template-columns: 1fr 1fr; }
+
+@media (max-width: 768px) {
+    .rm-datas-modulo { grid-template-columns: 1fr 1fr; }
+}

@@ -163,6 +163,18 @@ function createCard(projeto) {
 
     let hasProximaEtapa = projeto.has_proxima_etapa;
 
+    // Datas de início previstas: só alertam, nunca movem o card
+    const alertas = projeto.alertas_inicio || {};
+    let inicioAlerta = "";
+    if (alertas.aguardando) {
+        const a = alertas.aguardando;
+        inicioAlerta += `<div class="inicio-alerta inicio-aguardando" title="Início previsto do módulo">🕒 Início previsto: ${formatDate(a.data)} (em ${a.dias}d)</div>`;
+    }
+    if (alertas.proxima_atrasada) {
+        const a = alertas.proxima_atrasada;
+        inicioAlerta += `<div class="inicio-alerta inicio-atrasado" title="O card só avança quando a fase atual for concluída">⚠️ ${a.fase_nome} deveria ter iniciado em ${formatDate(a.data)} (${a.dias}d)</div>`;
+    }
+
     let priorityBadge = "";
     if (projeto.prioridade === 3) priorityBadge = '<span class="priority-badge priority-3">🔴 Urgente</span>';
     else if (projeto.prioridade === 2) priorityBadge = '<span class="priority-badge priority-2">🟠 Prioridade</span>';
@@ -220,6 +232,7 @@ function createCard(projeto) {
         ${funcsFase.length > 0
             ? `<div class="card-responsavel">👤 ${funcsFase.join(", ")}</div>`
             : (projeto.responsavel_nome ? `<div class="card-responsavel">👤 ${projeto.responsavel_nome}</div>` : "")}
+        ${inicioAlerta}
         ${aprovacaoBadge}
         ${relacao.length > 0 ? `<div style="margin-top:4px;">${relacao.map(r => {
             if (r === "pendente") return '<span class="relacao-badge relacao-pendente">⏳ Pendente</span>';
@@ -603,6 +616,7 @@ function adicionarModuloUI(dadosModulo = null) {
         dadosModulo.etapas_pre_definidas.forEach(etapa => {
             const faseId = etapa.fase_id || etapa;
             const dataLim = etapa.data_limite || "";
+            const dataIni = etapa.data_inicio || "";
             const funcId = etapa.funcionario_id || "";
             if (!faseId) return;
             const selOpts = allFases.map(f => `<option value="${f.id}" ${f.id == faseId ? 'selected' : ''}>${f.nome}</option>`).join("");
@@ -610,7 +624,8 @@ function adicionarModuloUI(dadosModulo = null) {
             fluxoHtml += `
                 <div class="fluxo-step-item" style="display:flex; gap:6px; align-items:center; margin-bottom:6px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; flex-wrap:wrap;">
                     <select class="input-select mod-etapa-step-fase" style="flex:2; min-width:120px;" onchange="onFluxoFaseChange(this)"><option value="">-- Fase --</option>${selOpts}</select>
-                    <input type="date" class="mod-etapa-step-data" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" value="${dataLim}" placeholder="Data esperada">
+                    <input type="date" class="mod-etapa-step-inicio" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" value="${dataIni}" title="Início previsto" aria-label="Início previsto">
+                    <input type="date" class="mod-etapa-step-data" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" value="${dataLim}" title="Prazo previsto" aria-label="Prazo previsto">
                     <select class="input-select mod-etapa-step-func" style="flex:2; min-width:120px;"><option value="">-- Funcionário (opcional) --</option>${funcOpts}</select>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="removeFluxoStep(this)" style="color:#ef4444; padding:4px 8px; min-width:auto;">✕</button>
                 </div>`;
@@ -640,9 +655,17 @@ function adicionarModuloUI(dadosModulo = null) {
             
             <div class="form-row">
                 <div class="form-group">
+                    <label>Início Previsto do Módulo</label>
+                    <input type="date" class="mod-data-inicio" value="${dadosModulo && dadosModulo.data_inicio ? dadosModulo.data_inicio : ''}">
+                </div>
+                <div class="form-group">
                     <label>Data Limite do Módulo</label>
                     <input type="date" class="mod-data" value="${dadosModulo && dadosModulo.data_limite ? dadosModulo.data_limite.split('T')[0] : ''}">
                 </div>
+            </div>
+            <p class="rm-ajuda" style="margin-top:-4px;">O início previsto é só uma referência: o card só avança de fase quando a fase atual é concluída.</p>
+
+            <div class="form-row">
                 <div class="form-group">
                     <label>Responsável</label>
                     <select class="mod-responsavel">
@@ -653,7 +676,7 @@ function adicionarModuloUI(dadosModulo = null) {
             </div>
             
             <div class="form-group" style="grid-column: 1 / -1;">
-                <label>Fluxo de Fases Pré-Definidas <span style="font-weight:normal; color:#94a3b8;">(Opcional, em ordem)</span></label>
+                <label>Fluxo de Fases Pré-Definidas <span style="font-weight:normal; color:#94a3b8;">(Opcional, em ordem: fase · início previsto · prazo previsto · funcionário)</span></label>
                 <div class="mod-fluxo-container" style="margin-bottom:8px;">
                     ${fluxoHtml}
                 </div>
@@ -676,7 +699,8 @@ window.addFluxoStep = function(btn) {
     const stepHtml = `
         <div class="fluxo-step-item" style="display:flex; gap:6px; align-items:center; margin-bottom:6px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; flex-wrap:wrap;">
             <select class="input-select mod-etapa-step-fase" style="flex:2; min-width:120px;" onchange="onFluxoFaseChange(this)"><option value="">-- Fase --</option>${faseOptions}</select>
-            <input type="date" class="mod-etapa-step-data" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" placeholder="Data esperada">
+            <input type="date" class="mod-etapa-step-inicio" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" title="Início previsto" aria-label="Início previsto">
+            <input type="date" class="mod-etapa-step-data" style="flex:1; min-width:120px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" title="Prazo previsto" aria-label="Prazo previsto">
             <select class="input-select mod-etapa-step-func" style="flex:2; min-width:120px;"><option value="">-- Funcionário (opcional) --</option>${funcOptions}</select>
             <button type="button" class="btn btn-ghost btn-sm" onclick="removeFluxoStep(this)" style="color:#ef4444; padding:4px 8px; min-width:auto;">✕</button>
         </div>`;
@@ -768,6 +792,7 @@ async function saveProject() {
             const modNome = mod.querySelector(".mod-nome").value;
             const modFase = mod.querySelector(".mod-fase").value;
             const modData = mod.querySelector(".mod-data").value;
+            const modDataInicio = mod.querySelector(".mod-data-inicio").value;
             const modResp = mod.querySelector(".mod-responsavel").value;
             const modDesc = mod.querySelector(".mod-descricao").value;
             const modEtapas = Array.from(mod.querySelectorAll(".fluxo-step-item")).map(step => {
@@ -775,6 +800,7 @@ async function saveProject() {
                 if (!faseId) return null;
                 return {
                     fase_id: parseInt(faseId),
+                    data_inicio: step.querySelector(".mod-etapa-step-inicio")?.value || null,
                     data_limite: step.querySelector(".mod-etapa-step-data")?.value || null,
                     funcionario_id: step.querySelector(".mod-etapa-step-func")?.value ? parseInt(step.querySelector(".mod-etapa-step-func").value) : null
                 };
@@ -783,6 +809,7 @@ async function saveProject() {
             data.objetos.push({
                 nome: modNome,
                 fase_id: modFase ? parseInt(modFase) : null,
+                data_inicio: modDataInicio || null,
                 data_limite: modData || null,
                 responsavel_id: modResp ? parseInt(modResp) : null,
                 descricao: modDesc,
@@ -930,6 +957,7 @@ async function openDetail(objetoId) {
             <div class="detail-item"><span class="detail-label">Solicitante</span><span class="detail-value">${p.solicitante || "—"}</span></div>
             <div class="detail-item"><span class="detail-label">Atividade</span><span class="detail-value">${p.atividade || "—"}</span></div>
             <div class="detail-item"><span class="detail-label">Data Inclusão</span><span class="detail-value">${formatDate(p.data_inclusao)}</span></div>
+            <div class="detail-item"><span class="detail-label">Início Previsto</span><span class="detail-value">${formatDate(p.data_inicio)}</span></div>
             <div class="detail-item"><span class="detail-label">Data Limite</span><span class="detail-value">${formatDate(p.data_limite)}</span></div>
             <div class="detail-item"><span class="detail-label">Responsável</span><span class="detail-value">${p.responsavel_nome || "—"}</span></div>
             <div class="detail-item"><span class="detail-label">Fase Atual</span><span class="detail-value">${p.fase_atual_nome || "Sem fase"}</span></div>
@@ -964,6 +992,7 @@ async function openDetail(objetoId) {
                 ? (allFuncionarios.find(f => f.id === etapa.funcionario_id)?.nome || "—")
                 : "—";
             const dataLim = etapa.data_limite ? formatDate(etapa.data_limite) : "—";
+            const dataIni = etapa.data_inicio ? formatDate(etapa.data_inicio) : "—";
             html += `
                 <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:${isCurrent ? 'rgba(99,102,241,0.08)' : 'var(--bg-primary)'}; border:1px ${isCurrent || isDone ? 'solid' : 'dashed'} ${isCurrent ? faseCor : 'var(--border)'}; border-radius:var(--radius); ${isCurrent ? 'box-shadow: 0 0 0 2px ' + faseCor + '33;' : ''} ${isDone ? 'opacity:0.7;' : ''}">
                     <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${isDone ? '✓' : idx + 1}</span>
@@ -971,7 +1000,8 @@ async function openDetail(objetoId) {
                         <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome} ${isCurrent ? '<span style="font-size:11px;background:' + faseCor + ';color:#fff;padding:1px 6px;border-radius:10px;margin-left:6px;">ATUAL</span>' : ''}</div>
                     </div>
                     <div style="display:flex;gap:16px;font-size:13px;color:var(--text-secondary);flex-shrink:0;flex-wrap:wrap;">
-                        <span title="Prazo esperado">📅 ${dataLim}</span>
+                        <span title="Início previsto">▶ ${dataIni}</span>
+                        <span title="Prazo previsto">📅 ${dataLim}</span>
                         <span title="Funcionário pré-definido">👤 ${funcNome}</span>
                     </div>
                 </div>
@@ -1357,11 +1387,12 @@ async function selecionarModuloRoadmap(id, ignorarAlteracoes = false) {
     rm.selecionado = id;
     rm.dirty = false;
     if (id === "novo") {
-        rm.etapas = [{ fase_id: null, data_limite: null, funcionario_id: null }];
-        rm.novo = { nome: "", data_limite: "", responsavel_id: "", descricao: "" };
+        rm.etapas = [{ fase_id: null, data_inicio: null, data_limite: null, funcionario_id: null }];
+        rm.novo = { nome: "", data_inicio: "", data_limite: "", responsavel_id: "", descricao: "" };
     } else {
         const mod = moduloSelecionado();
         rm.etapas = JSON.parse(JSON.stringify(mod?.etapas_pre_definidas || []));
+        rm.datasModulo = { data_inicio: mod?.data_inicio || "", data_limite: mod?.data_limite || "" };
     }
     renderModulosRoadmap();
     await renderPainelRoadmap();
@@ -1400,14 +1431,18 @@ async function linhaEtapaEditavel(etapa, idx, total, travado) {
                     </select>
                 </label>
                 <label class="rm-campo">
-                    <span>Prazo previsto</span>
-                    <input type="date" value="${etapa.data_limite || ""}" onchange="alterarEtapaRoadmap(${idx}, 'data_limite', this.value)">
-                </label>
-                <label class="rm-campo">
                     <span>Funcionário</span>
                     <select class="input-select" onchange="alterarEtapaRoadmap(${idx}, 'funcionario_id', this.value)">
                         <option value="">-- A definir --</option>${funcOpts}
                     </select>
+                </label>
+                <label class="rm-campo">
+                    <span>Início previsto</span>
+                    <input type="date" value="${etapa.data_inicio || ""}" onchange="alterarEtapaRoadmap(${idx}, 'data_inicio', this.value)">
+                </label>
+                <label class="rm-campo">
+                    <span>Prazo previsto</span>
+                    <input type="date" value="${etapa.data_limite || ""}" onchange="alterarEtapaRoadmap(${idx}, 'data_limite', this.value)">
                 </label>
             </div>
             <div class="rm-etapa-acoes">
@@ -1428,7 +1463,7 @@ function linhaEtapaTravada(etapa, idx, atual) {
             <span class="rm-etapa-num" style="background:${cor};color:#fff;">${atual ? idx + 1 : "✓"}</span>
             <div class="rm-etapa-campos">
                 <span class="rm-etapa-fase" style="color:${cor};">${escHtml(fase?.nome || `Fase #${etapa.fase_id}`)}</span>
-                <span class="rm-etapa-info">📅 ${etapa.data_limite ? formatDate(etapa.data_limite) : "—"}</span>
+                <span class="rm-etapa-info" title="Início previsto → prazo previsto">▶ ${etapa.data_inicio ? formatDate(etapa.data_inicio) : "—"} · 📅 ${etapa.data_limite ? formatDate(etapa.data_limite) : "—"}</span>
                 <span class="rm-etapa-info">👤 ${escHtml(func?.nome || "—")}</span>
             </div>
             <span class="rm-etapa-tag">${atual ? "Atual" : "Cumprida"} 🔒</span>
@@ -1464,6 +1499,10 @@ async function renderPainelRoadmap() {
                     <input type="text" id="rm-novo-nome" value="${escHtml(rm.novo.nome)}" oninput="rm.novo.nome = this.value; marcarRoadmapAlterado()">
                 </div>
                 <div class="form-group">
+                    <label for="rm-novo-inicio">Início previsto do módulo</label>
+                    <input type="date" id="rm-novo-inicio" value="${rm.novo.data_inicio}" onchange="rm.novo.data_inicio = this.value; marcarRoadmapAlterado()">
+                </div>
+                <div class="form-group">
                     <label for="rm-novo-data">Data limite do módulo</label>
                     <input type="date" id="rm-novo-data" value="${rm.novo.data_limite}" onchange="rm.novo.data_limite = this.value; marcarRoadmapAlterado()">
                 </div>
@@ -1488,7 +1527,6 @@ async function renderPainelRoadmap() {
                     <h3>${escHtml(mod?.nome)}</h3>
                     <div class="rm-sub">
                         Fase atual: <span style="color:${mod?.fase_atual_cor};">●</span> ${escHtml(mod?.fase_atual_nome || "Sem fase")}
-                        · Prazo do módulo: ${formatDate(mod?.data_limite)}
                     </div>
                 </div>
                 ${isAdmin ? `
@@ -1497,7 +1535,18 @@ async function renderPainelRoadmap() {
                         Remover módulo
                     </button>` : ""}
             </div>
-            <p class="rm-ajuda">Etapas cumpridas e a etapa atual ficam travadas 🔒. As próximas podem ser editadas, reordenadas ou removidas.</p>
+            <div class="rm-datas-modulo">
+                <label class="rm-campo">
+                    <span>Início previsto do módulo</span>
+                    <input type="date" value="${rm.datasModulo.data_inicio || ""}" onchange="rm.datasModulo.data_inicio = this.value; marcarRoadmapAlterado()">
+                </label>
+                <label class="rm-campo">
+                    <span>Data limite do módulo *</span>
+                    <input type="date" value="${rm.datasModulo.data_limite || ""}" required onchange="rm.datasModulo.data_limite = this.value; marcarRoadmapAlterado()">
+                </label>
+            </div>
+            <p class="rm-ajuda">Etapas cumpridas e a etapa atual ficam travadas 🔒. As próximas podem ser editadas, reordenadas ou removidas.
+            Datas de início são previsões: o card só avança quando a fase atual é concluída.</p>
             ${foraDoRoadmap ? `<p class="rm-aviso">A fase atual (${escHtml(mod.fase_atual_nome)}) não faz parte do roadmap: ao concluir, o card irá para a etapa 1.</p>` : ""}
         `;
     }
@@ -1521,8 +1570,8 @@ async function renderPainelRoadmap() {
 async function alterarEtapaRoadmap(idx, campo, valor) {
     const etapa = rm.etapas[idx];
     if (!etapa) return;
-    if (campo === "data_limite") {
-        etapa.data_limite = valor || null;
+    if (campo === "data_limite" || campo === "data_inicio") {
+        etapa[campo] = valor || null;
     } else {
         etapa[campo] = valor ? parseInt(valor) : null;
     }
@@ -1555,7 +1604,7 @@ async function removerEtapaRoadmap(idx) {
 }
 
 async function adicionarEtapaRoadmap() {
-    rm.etapas.push({ fase_id: null, data_limite: null, funcionario_id: null });
+    rm.etapas.push({ fase_id: null, data_inicio: null, data_limite: null, funcionario_id: null });
     marcarRoadmapAlterado();
     await renderPainelRoadmap();
     document.querySelector("#rm-painel .rm-etapa:last-child select")?.focus();
@@ -1571,6 +1620,17 @@ function validarEtapasRoadmap() {
         showToast(`Selecione a fase da etapa ${semFase + 1}.`, "error");
         return false;
     }
+    // Datas ISO (yyyy-mm-dd) podem ser comparadas como texto
+    const invertida = rm.etapas.findIndex(e => e.data_inicio && e.data_limite && e.data_inicio > e.data_limite);
+    if (invertida !== -1) {
+        showToast(`Etapa ${invertida + 1}: o início previsto é depois do prazo previsto.`, "error");
+        return false;
+    }
+    const datas = rm.selecionado === "novo" ? rm.novo : rm.datasModulo;
+    if (datas.data_inicio && datas.data_limite && datas.data_inicio > datas.data_limite) {
+        showToast("O início previsto do módulo não pode ser depois da data limite.", "error");
+        return false;
+    }
     return true;
 }
 
@@ -1582,13 +1642,18 @@ async function aposAlterarProjetoRoadmap(selecionar) {
 
 async function salvarRoadmap() {
     if (!validarEtapasRoadmap()) return;
+    if (!rm.datasModulo.data_limite) { showToast("Informe a data limite do módulo.", "error"); return; }
     const btn = document.getElementById("rm-salvar");
     btn.disabled = true;
     try {
         const res = await fetch(`/api/objetos/${rm.selecionado}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ etapas_pre_definidas: rm.etapas }),
+            body: JSON.stringify({
+                etapas_pre_definidas: rm.etapas,
+                data_inicio: rm.datasModulo.data_inicio || null,
+                data_limite: rm.datasModulo.data_limite,
+            }),
         });
         if (res.ok) {
             showToast("Roadmap atualizado com sucesso!", "success");
@@ -1611,6 +1676,7 @@ async function criarModuloRoadmap() {
     const body = {
         nome,
         descricao: rm.novo.descricao.trim(),
+        data_inicio: rm.novo.data_inicio || null,
         data_limite: rm.novo.data_limite || null,
         responsavel_id: rm.novo.responsavel_id ? parseInt(rm.novo.responsavel_id) : null,
         fase_id: rm.etapas[0].fase_id,
@@ -1821,7 +1887,8 @@ async function buscarHistorico() {
                                 </div>
                             `;
                         } else if (ev.tipo === "fase_futura") {
-                            const dataLabel = ev.data_str === "Pendente" ? "Previsto" : `Prazo: ${ev.data_str}`;
+                            const dataLabel = (ev.inicio_str ? `Início previsto: ${ev.inicio_str} · ` : "")
+                                + (ev.data_str === "Pendente" ? "Prazo a definir" : `Prazo: ${ev.data_str}`);
                             const respLabel = ev.responsavel === "—" ? "A definir" : ev.responsavel;
                             html += `
                                 <div class="timeline-item timeline-item-future" style="--item-color: ${ev.fase_cor};">
