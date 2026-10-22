@@ -28,12 +28,11 @@
             <option value="3">🔴 Urgente</option>
         </select>
         <select class="input-select" id="kanban-filter-relacao">
-            <option value="">Meus Cards</option>
-            <option value="todos">📋 Todos os cards</option>
-            <option value="pendentes">⏳ Pendentes</option>
+            <option value="" id="kanban-filter-relacao-todos">Meus Cards</option>
+            <option value="pendentes">⏳ Atuais</option>
             <option value="concluidos">✅ Concluídos</option>
             <option value="futuros">🔮 Futuros</option>
-            <option value="pendentes_futuros">📌 Pendentes e futuros</option>
+            <option value="pendentes_futuros">📌 Atuais e futuros</option>
         </select>
         <button class="btn btn-ghost" id="btn-historico">Ver Histórico</button>
         <button class="btn btn-primary" id="btn-novo-projeto" style="display:none;">+ Novo Projeto</button>
@@ -41,6 +40,9 @@
         <a href="/admin" class="btn btn-ghost" id="btn-admin" style="display:none;">Admin</a>
     </div>
 </div>
+
+<!-- Resumo da relação do funcionário em foco (preenchido pelo JS) -->
+<div class="relacao-resumo" id="relacao-resumo" style="display:none;"></div>
 
 <!-- Kanban Board -->
 <div class="kanban-board" id="kanban-board">
@@ -285,5 +287,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/kanban.js?v=9"></script>
+<script src="/static/js/kanban.js?v=10"></script>
 {% endblock %}

@@ -25,29 +25,41 @@ async function loadUser() {
     document.getElementById("user-name").textContent = currentUser.nome;
     document.getElementById("user-badge").textContent = currentUser.perfil;
     // Show/hide buttons based on role
-    if (["admin", "gestor"].includes(currentUser.perfil)) {
+    if (isGestao()) {
         document.getElementById("btn-novo-projeto").style.display = "";
         document.getElementById("btn-nova-fase").style.display = "";
         document.getElementById("btn-admin").style.display = "";
+        // Lista completa de funcionários para o filtro "ver cards de um funcionário"
+        const res = await fetch("/api/funcionarios");
+        if (res.ok) allFuncionarios = await res.json();
     }
 }
 
+function isGestao() {
+    return ["admin", "gestor"].includes(currentUser?.perfil);
+}
+
+// Admin/Gestor: id do funcionário selecionado no filtro (ou null)
+function getFuncionarioEmFoco() {
+    if (!isGestao()) return null;
+    const value = document.getElementById("kanban-filter-funcionario")?.value;
+    return value ? parseInt(value) : null;
+}
+
 async function loadBoard() {
-    // Build URL with optional relacao_func_id for admin/gestor
+    // Admin/Gestor com funcionário selecionado: o backend devolve só os cards dele,
+    // com a relação (atual/concluído/futuro) calculada para ele
     let url = "/api/kanban";
-    if (["admin", "gestor"].includes(currentUser?.perfil)) {
-        const funcFilter = document.getElementById("kanban-filter-funcionario")?.value;
-        if (funcFilter) {
-            // Find the funcionario ID by name
-            const func = allFuncionarios.find(f => f.nome === funcFilter);
-            if (func) url += `?relacao_func_id=${func.id}`;
-        }
-    }
+    const funcId = getFuncionarioEmFoco();
+    if (funcId) url += `?funcionario_id=${funcId}`;
     const res = await fetch(url);
     if (!res.ok) return;
     boardData = await res.json();
     renderBoard(boardData);
     populateFuncionarioFilter(boardData);
+    // Reaplicar filtros ativos após recarregar (ex.: depois de mover/aprovar um card)
+    filterBoard();
+    renderRelacaoResumo();
 }
 
 async function loadSelectData() {
@@ -222,7 +234,7 @@ function createCard(projeto) {
             : (projeto.responsavel_nome ? `<div class="card-responsavel">👤 ${projeto.responsavel_nome}</div>` : "")}
         ${aprovacaoBadge}
         ${relacao.length > 0 ? `<div style="margin-top:4px;">${relacao.map(r => {
-            if (r === "pendente") return '<span class="relacao-badge relacao-pendente">⏳ Pendente</span>';
+            if (r === "pendente") return '<span class="relacao-badge relacao-pendente">⏳ Atual</span>';
             if (r === "concluido") return '<span class="relacao-badge relacao-concluido">✅ Concluído</span>';
             if (r === "futuro") return '<span class="relacao-badge relacao-futuro">🔮 Futuro</span>';
             return '';
@@ -428,8 +440,8 @@ function setupToolbar() {
         filterBoard();
     });
     document.getElementById("kanban-filter-funcionario").addEventListener("change", async () => {
-        // For admin/gestor: reload board with relacao_func_id to get relationship data
-        if (["admin", "gestor"].includes(currentUser?.perfil)) {
+        // Admin/Gestor: recarrega o board com os cards do funcionário selecionado
+        if (isGestao()) {
             await loadBoard();
         }
         filterBoard();
@@ -439,6 +451,7 @@ function setupToolbar() {
     });
     document.getElementById("kanban-filter-relacao")?.addEventListener("change", () => {
         filterBoard();
+        renderRelacaoResumo();
     });
 
     // View toggle
@@ -474,16 +487,12 @@ function filterBoard() {
             if (slaFilter === "fora") matchSla = badge?.classList.contains("sla-fora");
         }
 
+        // Admin/Gestor: o backend já filtrou os cards do funcionário selecionado.
+        // Funcionário: filtra pelos colegas na fase atual (por nome).
         let matchFunc = true;
-        if (funcFilter) {
+        if (funcFilter && !isGestao()) {
             const funcionariosFase = card.dataset.funcionariosFase || "";
-            const relacaoData = card.dataset.relacaoFuncionario || "";
-            // For admin/gestor with relationship data, show cards where the employee has any relationship
-            if (relacaoData) {
-                matchFunc = relacaoData.length > 0;
-            } else {
-                matchFunc = funcionariosFase.split(",").includes(funcFilter);
-            }
+            matchFunc = funcionariosFase.split(",").includes(funcFilter);
         }
 
         let matchPrio = true;
@@ -498,13 +507,10 @@ function filterBoard() {
             const relacoes = relacaoData ? relacaoData.split(",").filter(r => r) : [];
             
             if (relacoes.length === 0) {
-                // No relationship data — show all when "todos", hide for specific filters
-                matchRelacao = (relacaoFilter === "todos");
+                // Sem dados de relação: filtros de situação não se aplicam
+                matchRelacao = false;
             } else {
                 switch (relacaoFilter) {
-                    case "todos":
-                        matchRelacao = relacoes.length > 0;
-                        break;
                     case "pendentes":
                         matchRelacao = relacoes.includes("pendente");
                         break;
@@ -530,6 +536,23 @@ function filterBoard() {
 function populateFuncionarioFilter(data) {
     const select = document.getElementById("kanban-filter-funcionario");
     const currentValue = select.value;
+
+    if (isGestao()) {
+        // Admin/Gestor: todos os funcionários (por id), inclusive os que só têm
+        // cards concluídos ou futuros
+        select.innerHTML = '<option value="">Todos os Funcionários</option>';
+        [...allFuncionarios]
+            .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+            .forEach(f => {
+                select.innerHTML += `<option value="${f.id}">${f.nome}</option>`;
+            });
+        if (currentValue && allFuncionarios.some(f => String(f.id) === currentValue)) {
+            select.value = currentValue;
+        }
+        atualizarFiltroRelacao();
+        return;
+    }
+
     const names = new Set();
     data.forEach(col => {
         (col.objetos || []).forEach(obj => {
@@ -546,6 +569,85 @@ function populateFuncionarioFilter(data) {
     if (currentValue && names.has(currentValue)) {
         select.value = currentValue;
     }
+}
+
+// Filtro de situação (atual/concluído/futuro): só faz sentido com um funcionário em foco
+function atualizarFiltroRelacao() {
+    const select = document.getElementById("kanban-filter-relacao");
+    const optTodos = document.getElementById("kanban-filter-relacao-todos");
+    if (!select || !optTodos) return;
+
+    if (!isGestao()) {
+        optTodos.textContent = "Meus Cards";
+        return;
+    }
+    const funcId = getFuncionarioEmFoco();
+    if (funcId) {
+        const func = allFuncionarios.find(f => f.id === funcId);
+        optTodos.textContent = `Todos os cards de ${func ? func.nome : "funcionário"}`;
+        select.disabled = false;
+        select.title = "";
+    } else {
+        optTodos.textContent = "Situação: escolha um funcionário";
+        select.value = "";
+        select.disabled = true;
+        select.title = "Selecione um funcionário para filtrar os cards atuais, concluídos e futuros dele";
+    }
+}
+
+// Resumo clicável com a contagem de cards atuais, concluídos e futuros do funcionário em foco
+function renderRelacaoResumo() {
+    const container = document.getElementById("relacao-resumo");
+    if (!container) return;
+
+    const funcId = getFuncionarioEmFoco();
+    const emFoco = isGestao() ? funcId !== null : currentUser?.funcionario_id != null;
+    if (!emFoco) {
+        container.style.display = "none";
+        container.innerHTML = "";
+        return;
+    }
+
+    const contagem = { pendente: 0, concluido: 0, futuro: 0 };
+    boardData.forEach(col => {
+        (col.objetos || []).forEach(o => {
+            (o.relacao_funcionario || []).forEach(r => {
+                if (r in contagem) contagem[r]++;
+            });
+        });
+    });
+
+    let titulo = "Meus cards";
+    if (isGestao()) {
+        const func = allFuncionarios.find(f => f.id === funcId);
+        titulo = `Cards de ${func ? func.nome : "funcionário"}`;
+    }
+
+    const filtroAtual = document.getElementById("kanban-filter-relacao")?.value || "";
+    const chips = [
+        { valor: "", rotulo: "Todos", classe: "relacao-chip-todos", qtd: null },
+        { valor: "pendentes", rotulo: "⏳ Atuais", classe: "relacao-pendente", qtd: contagem.pendente },
+        { valor: "concluidos", rotulo: "✅ Concluídos", classe: "relacao-concluido", qtd: contagem.concluido },
+        { valor: "futuros", rotulo: "🔮 Futuros", classe: "relacao-futuro", qtd: contagem.futuro },
+    ];
+
+    container.innerHTML = `
+        <span class="relacao-resumo-titulo">${titulo}</span>
+        ${chips.map(c => `
+            <button type="button" class="relacao-chip ${c.classe} ${filtroAtual === c.valor ? "ativo" : ""}"
+                    data-valor="${c.valor}" aria-pressed="${filtroAtual === c.valor}">
+                ${c.rotulo}${c.qtd !== null ? ` <strong>${c.qtd}</strong>` : ""}
+            </button>
+        `).join("")}
+    `;
+    container.querySelectorAll(".relacao-chip").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.getElementById("kanban-filter-relacao").value = btn.dataset.valor;
+            filterBoard();
+            renderRelacaoResumo();
+        });
+    });
+    container.style.display = "flex";
 }
 
 function updateColumnCounts() {
