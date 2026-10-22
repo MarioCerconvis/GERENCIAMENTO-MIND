@@ -1027,59 +1027,85 @@ def calcular_relacao_funcionario(objeto, func_id):
     
     return list(relacoes) if relacoes else []
 
+
+def ids_objetos_relacionados(func_id):
+    """IDs dos objetos com que o funcionário tem relação: atribuído em qualquer fase
+    (atual ou passada) ou pré-definido em alguma etapa do roadmap."""
+    # Query 1: Cards onde o funcionário está atribuído em qualquer fase
+    assigned_ids = db.session.query(Objeto.id).join(ObjetoFase).join(
+        objeto_fase_funcionario,
+        objeto_fase_funcionario.c.id_objeto_fase == ObjetoFase.id,
+    ).filter(
+        objeto_fase_funcionario.c.id_funcionario == func_id
+    ).distinct().all()
+    assigned_ids = {r[0] for r in assigned_ids}
+
+    # Query 2: Cards onde o funcionário está no roadmap
+    roadmap_candidates = Objeto.query.filter(
+        Objeto.etapas_pre_definidas.isnot(None),
+        Objeto.etapas_pre_definidas != ''
+    ).all()
+    roadmap_ids = set()
+    for o in roadmap_candidates:
+        etapas = parse_etapas(o.etapas_pre_definidas)
+        for e in etapas:
+            if e.get("funcionario_id") == func_id:
+                roadmap_ids.add(o.id)
+                break
+
+    return assigned_ids | roadmap_ids
+
+
 @app.route("/api/kanban", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_kanban():
-    """Retorna dados do board Kanban: fases como colunas + objetos."""
+    """Retorna dados do board Kanban: fases como colunas + objetos.
+
+    - Funcionário: vê apenas os cards com que tem relação.
+    - Admin/Gestor: vê todos os cards. Com ?funcionario_id=X, vê apenas os cards
+      relacionados ao funcionário X (atuais, concluídos e futuros), com a relação
+      calculada para X.
+    """
     u = get_usuario_logado()
     fases = Fase.query.filter(db.or_(Fase.ativa == True, Fase.ativa == None)).order_by(Fase.ordem).all()
-    
-    # Determinar func_id para cálculo de relação
+
+    # Funcionário cujos cards devem ser filtrados (None = sem filtro)
+    filtro_func_id = None
+    # Funcionário usado para calcular a relação de cada card
     relacao_func_id = None
-    if u.perfil == "funcionario" and u.funcionario:
-        relacao_func_id = u.funcionario.id_func
+    if u.perfil == "funcionario":
+        if not u.funcionario:
+            # Usuário sem funcionário vinculado não tem cards
+            filtro_func_id = -1
+        else:
+            filtro_func_id = relacao_func_id = u.funcionario.id_func
     else:
-        # Admin/Gestor pode solicitar relação de um funcionário específico
-        rfid = request.args.get("relacao_func_id")
-        if rfid:
+        fid = request.args.get("funcionario_id")
+        if fid:
             try:
-                relacao_func_id = int(rfid)
+                fid = int(fid)
             except (ValueError, TypeError):
-                pass
-    
+                return jsonify({"erro": "funcionario_id inválido"}), 400
+            if not db.session.get(Funcionario, fid):
+                return jsonify({"erro": "Funcionário não encontrado"}), 404
+            filtro_func_id = relacao_func_id = fid
+        else:
+            # Compatibilidade: relação sem filtrar os cards
+            rfid = request.args.get("relacao_func_id")
+            if rfid:
+                try:
+                    relacao_func_id = int(rfid)
+                except (ValueError, TypeError):
+                    pass
+
     objetos_query = Objeto.query
-    if u.perfil == "funcionario" and u.funcionario:
-        func_id = u.funcionario.id_func
-        
-        # Query 1: Cards onde o funcionário está atribuído em qualquer fase
-        assigned_ids = db.session.query(Objeto.id).join(ObjetoFase).join(
-            objeto_fase_funcionario,
-            objeto_fase_funcionario.c.id_objeto_fase == ObjetoFase.id,
-        ).filter(
-            objeto_fase_funcionario.c.id_funcionario == func_id
-        ).distinct().all()
-        assigned_ids = {r[0] for r in assigned_ids}
-        
-        # Query 2: Cards onde o funcionário está no roadmap futuro
-        roadmap_candidates = Objeto.query.filter(
-            Objeto.etapas_pre_definidas.isnot(None),
-            Objeto.etapas_pre_definidas != ''
-        ).all()
-        roadmap_ids = set()
-        for o in roadmap_candidates:
-            etapas = parse_etapas(o.etapas_pre_definidas)
-            for e in etapas:
-                if e.get("funcionario_id") == func_id:
-                    roadmap_ids.add(o.id)
-                    break
-        
-        # Combinar
-        all_ids = assigned_ids | roadmap_ids
+    if filtro_func_id is not None:
+        all_ids = ids_objetos_relacionados(filtro_func_id) if filtro_func_id > 0 else set()
         if all_ids:
             objetos_query = Objeto.query.filter(Objeto.id.in_(all_ids))
         else:
             objetos_query = Objeto.query.filter(db.literal(False))
-    
+
     objetos = objetos_query.all()
     
     # Montar board
@@ -1099,6 +1125,9 @@ def api_kanban():
         # Adicionar relação do funcionário se solicitado
         if relacao_func_id:
             obj_dict["relacao_funcionario"] = calcular_relacao_funcionario(o, relacao_func_id)
+            # Etapa pré-definida já passada e executada por outra pessoa: sem relação real
+            if filtro_func_id and not obj_dict["relacao_funcionario"]:
+                continue
         else:
             obj_dict["relacao_funcionario"] = None
         

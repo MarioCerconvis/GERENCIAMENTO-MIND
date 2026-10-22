@@ -1165,3 +1165,50 @@ input[type="color"] {
     .kanban-board.horizontal .project-card { width: 100%; max-width: 100%; min-width: 100%; }
     .kanban-board.horizontal .column-body { flex-wrap: wrap; }
 }
+
+/* ─── Resumo da relação do funcionário em foco ───────────────────────── */
+
+.relacao-resumo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+
+.relacao-resumo-titulo {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-right: 4px;
+}
+
+.relacao-chip {
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: box-shadow var(--transition), transform var(--transition);
+}
+
+.relacao-chip:hover { transform: translateY(-1px); }
+.relacao-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.relacao-chip.ativo { box-shadow: 0 0 0 2px currentColor; }
+
+.relacao-chip-todos {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.kanban-toolbar .input-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
