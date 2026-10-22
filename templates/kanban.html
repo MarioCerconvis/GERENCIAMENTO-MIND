@@ -20,12 +20,11 @@
         <select class="input-select" id="kanban-filter-funcionario">
             <option value="">Todos os Funcionários</option>
         </select>
-        <select class="input-select" id="kanban-filter-prioridade">
+        <select class="input-select" id="kanban-filter-prioridade" title="Posição do card na fila de prioridade do funcionário">
             <option value="">Todas as Prioridades</option>
-            <option value="0">Sem flag</option>
-            <option value="1">🟡 Importante</option>
-            <option value="2">🟠 Prioridade</option>
-            <option value="3">🔴 Urgente</option>
+            <option value="1">🎯 Prioridade 1</option>
+            <option value="top3">Top 3</option>
+            <option value="sem">Sem prioridade</option>
         </select>
         <select class="input-select" id="kanban-filter-relacao">
             <option value="">Meus Cards</option>
@@ -38,6 +37,7 @@
         <button class="btn btn-ghost" id="btn-historico">Ver Histórico</button>
         <button class="btn btn-primary" id="btn-novo-projeto" style="display:none;">+ Novo Projeto</button>
         <button class="btn btn-ghost" id="btn-nova-fase" style="display:none;">+ Nova Fase</button>
+        <a href="/prioridades" class="btn btn-ghost" id="btn-prioridades" style="display:none;">Prioridades</a>
         <a href="/admin" class="btn btn-ghost" id="btn-admin" style="display:none;">Admin</a>
     </div>
 </div>
@@ -285,5 +285,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/kanban.js?v=9"></script>
+<script src="/static/js/kanban.js?v=10"></script>
 {% endblock %}

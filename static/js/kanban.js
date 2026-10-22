@@ -29,7 +29,50 @@ async function loadUser() {
         document.getElementById("btn-novo-projeto").style.display = "";
         document.getElementById("btn-nova-fase").style.display = "";
         document.getElementById("btn-admin").style.display = "";
+        document.getElementById("btn-prioridades").style.display = "";
     }
+}
+
+// ─── Prioridade numérica (fila por funcionário) ──────────────────────────────
+
+// Funcionário cuja fila define a prioridade exibida/ordenada no board:
+// o próprio funcionário logado, ou o selecionado no filtro (admin/gestor)
+function prioridadeDoContexto(objeto) {
+    const prios = objeto.prioridades_fase_atual || [];
+    if (currentUser?.perfil === "funcionario") {
+        return prios.find(p => p.funcionario_id === currentUser.funcionario_id) || null;
+    }
+    const filtroNome = document.getElementById("kanban-filter-funcionario")?.value;
+    if (filtroNome) return prios.find(p => p.nome === filtroNome) || null;
+    return null;
+}
+
+// Prioridade usada para ordenar/filtrar: a do contexto, senão a melhor posição da equipe
+function prioridadeEfetiva(objeto) {
+    const ctx = prioridadeDoContexto(objeto);
+    if (ctx) return ctx.prioridade;
+    const valores = (objeto.prioridades_fase_atual || [])
+        .map(p => p.prioridade)
+        .filter(v => v != null);
+    return valores.length ? Math.min(...valores) : null;
+}
+
+function classePrioridade(valor) {
+    if (valor === 1) return "prio-1";
+    if (valor <= 3) return "prio-2";
+    return "prio-n";
+}
+
+function badgesPrioridade(objeto) {
+    const ctx = prioridadeDoContexto(objeto);
+    if (ctx) {
+        if (ctx.prioridade == null) return "";
+        return `<span class="prio-badge ${classePrioridade(ctx.prioridade)}" title="Prioridade ${ctx.prioridade} de ${ctx.total} na fila de ${ctx.nome}">🎯 #${ctx.prioridade} <span class="prio-total">de ${ctx.total}</span></span>`;
+    }
+    return (objeto.prioridades_fase_atual || [])
+        .filter(p => p.prioridade != null)
+        .map(p => `<span class="prio-badge ${classePrioridade(p.prioridade)}" title="Prioridade ${p.prioridade} de ${p.total} na fila de ${p.nome}">${p.nome.split(" ")[0]} #${p.prioridade}</span>`)
+        .join("");
 }
 
 async function loadBoard() {
@@ -96,10 +139,11 @@ function renderBoard(data) {
 
         const body = column.querySelector(".column-body");
 
+        // Prioridade numérica (1 primeiro; sem prioridade por último), depois ordem manual
         col.objetos.sort((a, b) => {
-            if ((b.prioridade || 0) !== (a.prioridade || 0)) {
-                return (b.prioridade || 0) - (a.prioridade || 0);
-            }
+            const pa = prioridadeEfetiva(a) ?? Infinity;
+            const pb = prioridadeEfetiva(b) ?? Infinity;
+            if (pa !== pb) return pa - pb;
             return (a.ordem_kanban || 0) - (b.ordem_kanban || 0);
         });
 
@@ -126,7 +170,7 @@ function createCard(projeto) {
     const card = document.createElement("div");
     card.className = "project-card";
     card.dataset.objetoId = projeto.id;
-    card.dataset.prioridade = projeto.prioridade ?? 0;
+    card.dataset.prioridade = prioridadeEfetiva(projeto) ?? "";
     // Phase-level funcionários for filtering
     const funcsFase = (projeto.funcionarios_fase_atual || []).map(f => f.nome);
     card.dataset.funcionariosFase = funcsFase.join(",");
@@ -163,10 +207,7 @@ function createCard(projeto) {
 
     let hasProximaEtapa = projeto.has_proxima_etapa;
 
-    let priorityBadge = "";
-    if (projeto.prioridade === 3) priorityBadge = '<span class="priority-badge priority-3">🔴 Urgente</span>';
-    else if (projeto.prioridade === 2) priorityBadge = '<span class="priority-badge priority-2">🟠 Prioridade</span>';
-    else if (projeto.prioridade === 1) priorityBadge = '<span class="priority-badge priority-1">🟡 Importante</span>';
+    const priorityBadge = badgesPrioridade(projeto);
 
     // ── Aprovação (dupla aprovação) ──
     const aprovacao = projeto.aprovacao || { aprovados: 0, total: 0, todos_aprovaram: true };
@@ -211,7 +252,7 @@ function createCard(projeto) {
         <div class="card-cliente" style="font-size:0.85em; font-weight:bold; margin-bottom: 2px;">${projeto.projeto_nome || ""}</div>
         <div class="card-cliente">${projeto.cliente || "—"}</div>
         
-        ${priorityBadge ? `<div style="margin-bottom: 6px;">${priorityBadge}</div>` : ""}
+        ${priorityBadge ? `<div class="prio-badges">${priorityBadge}</div>` : ""}
         
         <div class="card-footer">
             <span class="sla-badge ${slaClass}">${slaIcon} ${slaDias}</span>
@@ -431,6 +472,8 @@ function setupToolbar() {
         // For admin/gestor: reload board with relacao_func_id to get relationship data
         if (["admin", "gestor"].includes(currentUser?.perfil)) {
             await loadBoard();
+        } else {
+            renderBoard(boardData);  // reordena pela fila do funcionário selecionado
         }
         filterBoard();
     });
@@ -488,7 +531,10 @@ function filterBoard() {
 
         let matchPrio = true;
         if (prioFilter !== "") {
-            matchPrio = card.dataset.prioridade === prioFilter;
+            const prio = card.dataset.prioridade ? parseInt(card.dataset.prioridade) : null;
+            if (prioFilter === "1") matchPrio = prio === 1;
+            else if (prioFilter === "top3") matchPrio = prio !== null && prio <= 3;
+            else if (prioFilter === "sem") matchPrio = prio === null;
         }
 
         // Relationship filter
@@ -881,26 +927,35 @@ async function openDetail(objetoId) {
         </div>
     `;
 
-    // ── Prioridade ──
-    const prioNomes = { 0: "Sem flag", 1: "Importante", 2: "Prioridade", 3: "Urgente" };
-    if (currentUser?.perfil === "admin") {
+    // ── Prioridade na fila de cada funcionário da fase atual ──
+    const prios = p.prioridades_fase_atual || [];
+    if (prios.length > 0) {
+        const isAdmin = currentUser?.perfil === "admin";
         html += `
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);">
-                <span class="detail-label" style="margin:0;white-space:nowrap;">Prioridade:</span>
-                <select id="detalhe-prioridade" class="input-select" style="flex:1;">
-                    <option value="0" ${p.prioridade === 0 ? "selected" : ""}>Sem flag</option>
-                    <option value="1" ${p.prioridade === 1 ? "selected" : ""}>🟡 Importante</option>
-                    <option value="2" ${p.prioridade === 2 ? "selected" : ""}>🟠 Prioridade</option>
-                    <option value="3" ${p.prioridade === 3 ? "selected" : ""}>🔴 Urgente</option>
-                </select>
-                <button class="btn btn-primary btn-sm" onclick="mudarPrioridade(${p.id})">Salvar</button>
-            </div>
-        `;
-    } else if (p.prioridade > 0) {
-        html += `
-            <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);">
-                <span class="detail-label" style="margin-right:8px;">Prioridade:</span>
-                <span class="priority-badge priority-${p.prioridade}">${prioNomes[p.prioridade]}</span>
+            <div class="prio-detalhe">
+                <div class="prio-detalhe-header">
+                    <span class="detail-label" style="margin:0;">Prioridade na fila de cada funcionário</span>
+                    ${["admin", "gestor"].includes(currentUser?.perfil) ? `<a href="/prioridades" class="btn btn-ghost btn-sm">Ver todas as filas</a>` : ""}
+                </div>
+                ${prios.map(pr => {
+                    let controle;
+                    if (pr.aprovado) {
+                        controle = `<span class="prio-detalhe-info">✅ Já aprovou — fora da fila</span>`;
+                    } else if (isAdmin && pr.prioridade != null) {
+                        const opts = Array.from({ length: pr.total }, (_, i) => i + 1)
+                            .map(n => `<option value="${n}" ${n === pr.prioridade ? "selected" : ""}>${n}${n === 1 ? " (mais importante)" : ""}</option>`)
+                            .join("");
+                        controle = `
+                            <select class="input-select prio-detalhe-select" aria-label="Prioridade na fila de ${pr.nome}"
+                                    onchange="mudarPrioridadeFuncionario(${pr.funcionario_id}, ${p.fase_ativa_id}, this.value, ${p.id})">${opts}</select>
+                            <span class="prio-detalhe-info">de ${pr.total}</span>`;
+                    } else {
+                        controle = pr.prioridade != null
+                            ? `<span class="prio-badge ${classePrioridade(pr.prioridade)}">#${pr.prioridade}</span><span class="prio-detalhe-info">de ${pr.total}</span>`
+                            : `<span class="prio-detalhe-info">—</span>`;
+                    }
+                    return `<div class="prio-detalhe-linha"><span class="prio-detalhe-nome">👤 ${pr.nome}</span>${controle}</div>`;
+                }).join("")}
             </div>
         `;
     }
@@ -1097,22 +1152,22 @@ async function openDetail(objetoId) {
     abrirModal("modal-detalhe");
 }
 
-// ─── Alterar Prioridade ──────────────────────────────────────────────────────
+// ─── Alterar Prioridade (posição do card na fila de um funcionário) ──────────
 
-async function mudarPrioridade(projetoId) {
-    const prioridade = document.getElementById("detalhe-prioridade").value;
-    const res = await fetch(`/api/objetos/${projetoId}`, {
-        method: "PUT",
+async function mudarPrioridadeFuncionario(funcionarioId, objetoFaseId, posicao, objetoId) {
+    const res = await fetch(`/api/prioridades/${funcionarioId}/mover`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prioridade: parseInt(prioridade) })
+        body: JSON.stringify({ objeto_fase_id: objetoFaseId, posicao: parseInt(posicao) })
     });
     if (res.ok) {
         showToast("Prioridade atualizada!", "success");
-        await loadBoard();
     } else {
         const err = await res.json();
         showToast(err.erro || "Erro ao atualizar prioridade", "error");
     }
+    await loadBoard();
+    openDetail(objetoId);
 }
 
 // ─── Mover fase pelo detalhe ─────────────────────────────────────────────────

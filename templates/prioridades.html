@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Prioridades — Gerenciamento MIND{% endblock %}
+{% block content %}
+<div class="prio-toolbar">
+    <div>
+        <h1 class="page-title">Prioridades por funcionário</h1>
+        <p class="page-subtitle" id="prio-subtitulo">Cada coluna é a fila de trabalhos atuais de um funcionário. 1 = mais importante.</p>
+    </div>
+    <div class="prio-toolbar-acoes">
+        <input type="text" class="input-search" id="prio-busca" placeholder="Buscar funcionário ou OS..." aria-label="Buscar funcionário ou OS">
+        <label class="prio-toggle">
+            <input type="checkbox" id="prio-mostrar-vazios"> Mostrar quem está sem trabalhos
+        </label>
+        <a href="/kanban" class="btn btn-ghost">← Voltar ao Kanban</a>
+    </div>
+</div>
+
+<div class="prio-board" id="prio-board">
+    <div class="empty-state"><div class="empty-state-icon">⏳</div>Carregando filas...</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/prioridades.js?v=1"></script>
+{% endblock %}

@@ -35,6 +35,10 @@ objeto_fase_funcionario = db.Table(
     db.Column("id_funcionario", db.Integer, db.ForeignKey("funcionarios.id_func"), primary_key=True),
     db.Column("atribuido_em", db.DateTime, default=datetime.utcnow),
     db.Column("aprovado_em", db.DateTime, nullable=True),  # NULL = pendente, preenchido = aprovado
+    # Posição na fila de trabalhos atuais do funcionário (1 = mais importante).
+    # Só trabalhos atuais (fase ativa e ainda não aprovados pelo funcionário) têm
+    # prioridade; mantida contígua (1..n) por prioridades.renumerar_prioridades().
+    db.Column("prioridade", db.Integer, nullable=True),
 )
 
 
@@ -252,7 +256,10 @@ class Objeto(db.Model):
     responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
     fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
     etapas_pre_definidas = db.Column(db.Text, nullable=True)  # JSON array de objetos ou CSV legado
-    prioridade = db.Column(db.Integer, default=0)  # 0: sem flag, 1: Importante, 2: Prioridade, 3: Urgente
+    # LEGADO: flag antiga (0: sem flag, 1: Importante, 2: Prioridade, 3: Urgente).
+    # Substituída pela prioridade numérica por funcionário (objeto_fase_funcionario.prioridade);
+    # mantida só para a migração inicial e para permitir rollback.
+    prioridade = db.Column(db.Integer, default=0)
     ordem_kanban = db.Column(db.Integer, default=0)
 
     # Relacionamentos
@@ -363,7 +370,6 @@ class Objeto(db.Model):
             "fase_atual_id": self.fase_atual_id,
             "fase_atual_nome": self.fase_atual.nome_fase if self.fase_atual else "",
             "fase_atual_cor": self.fase_atual.cor if self.fase_atual else "#94a3b8",
-            "prioridade": self.prioridade,
             "ordem_kanban": self.ordem_kanban,
             "sla": {
                 "flag": self.sla_flag(),
@@ -397,6 +403,10 @@ class Objeto(db.Model):
             ]
         else:
             d["aprovacao_funcionarios"] = []
+
+        # Posição deste card na fila de cada funcionário da fase ativa
+        from prioridades import prioridades_da_fase
+        d["prioridades_fase_atual"] = prioridades_da_fase(fase_ativa) if fase_ativa else []
 
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]
