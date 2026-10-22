@@ -39,3 +39,6 @@ def ensure_schema():
         priorizacao_inicial()
         db.session.commit()
         print("[SCHEMA] Filas de prioridade montadas a partir das flags antigas.")
+
+    # Data de início prevista do módulo
+    _adicionar_coluna("objetos", "data_inicio", "DATE NULL")

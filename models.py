@@ -202,7 +202,11 @@ class Projeto(db.Model):
 def parse_etapas(raw):
     """Converte etapas_pre_definidas (CSV legado ou JSON rico) em lista padronizada.
     
-    Retorna: [{"fase_id": int, "data_limite": str|None, "funcionario_id": int|None}, ...]
+    Retorna: [{"fase_id": int, "data_inicio": str|None, "data_limite": str|None,
+               "funcionario_id": int|None}, ...]
+
+    data_inicio é o início esperado da etapa e data_limite o fim esperado. O início
+    é só uma previsão: o card só entra na etapa quando a anterior é concluída.
     """
     if not raw or not str(raw).strip():
         return []
@@ -218,11 +222,12 @@ def parse_etapas(raw):
                 if isinstance(item, dict):
                     result.append({
                         "fase_id": int(item.get("fase_id", 0)),
+                        "data_inicio": item.get("data_inicio") or None,
                         "data_limite": item.get("data_limite") or None,
                         "funcionario_id": int(item["funcionario_id"]) if item.get("funcionario_id") else None,
                     })
                 elif isinstance(item, (int, float)):
-                    result.append({"fase_id": int(item), "data_limite": None, "funcionario_id": None})
+                    result.append({"fase_id": int(item), "data_inicio": None, "data_limite": None, "funcionario_id": None})
             return result
         except (json.JSONDecodeError, ValueError, TypeError):
             return []
@@ -230,7 +235,7 @@ def parse_etapas(raw):
     # Fallback: CSV legado ("1,4,5")
     try:
         return [
-            {"fase_id": int(v.strip()), "data_limite": None, "funcionario_id": None}
+            {"fase_id": int(v.strip()), "data_inicio": None, "data_limite": None, "funcionario_id": None}
             for v in raw.split(",") if v.strip()
         ]
     except ValueError:
@@ -253,6 +258,8 @@ class Objeto(db.Model):
     nome = db.Column(db.String(200), nullable=False)
     descricao = db.Column(db.Text, nullable=True)
     data_limite = db.Column(db.Date, nullable=False) # SLA do objeto
+    # Início esperado do módulo. Informativo: não move o card nem muda de fase sozinho
+    data_inicio = db.Column(db.Date, nullable=True)
     responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
     fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
     etapas_pre_definidas = db.Column(db.Text, nullable=True)  # JSON array de objetos ou CSV legado
@@ -329,6 +336,40 @@ class Objeto(db.Model):
                 
         return best_idx
 
+    def alertas_inicio(self):
+        """Alertas sobre datas de início previstas (nunca movem o card).
+
+        - aguardando: o início previsto do módulo ainda não chegou
+        - proxima_atrasada: o início previsto da próxima etapa já passou, mas
+          a etapa atual ainda não foi concluída
+        """
+        hoje = date.today()
+        alertas = {"aguardando": None, "proxima_atrasada": None}
+
+        if self.data_inicio and self.data_inicio > hoje:
+            alertas["aguardando"] = {
+                "data": self.data_inicio.isoformat(),
+                "dias": (self.data_inicio - hoje).days,
+            }
+
+        etapas = parse_etapas(self.etapas_pre_definidas)
+        if etapas and self.has_proxima_etapa():
+            idx = self.calcular_indice_fase_atual() if self.fase_atual_id else -1
+            proxima = etapas[idx + 1] if idx + 1 < len(etapas) else None
+            if proxima and proxima.get("data_inicio"):
+                try:
+                    inicio = date.fromisoformat(proxima["data_inicio"])
+                except (ValueError, TypeError):
+                    inicio = None
+                if inicio and inicio < hoje:
+                    fase = db.session.get(Fase, proxima["fase_id"])
+                    alertas["proxima_atrasada"] = {
+                        "data": inicio.isoformat(),
+                        "dias": (hoje - inicio).days,
+                        "fase_nome": fase.nome_fase if fase else "",
+                    }
+        return alertas
+
     def has_proxima_etapa(self):
         etapas_list = parse_etapas(self.etapas_pre_definidas)
         if not etapas_list:
@@ -365,6 +406,8 @@ class Objeto(db.Model):
             "nome": self.nome,
             "descricao": self.descricao or "",
             "data_limite": self.data_limite.isoformat() if self.data_limite else "",
+            "data_inicio": self.data_inicio.isoformat() if self.data_inicio else None,
+            "alertas_inicio": self.alertas_inicio(),
             "responsavel_id": self.responsavel_id,
             "responsavel_nome": self.responsavel.nome if self.responsavel else "",
             "fase_atual_id": self.fase_atual_id,
@@ -378,6 +421,9 @@ class Objeto(db.Model):
             },
             "sla_fase": sla_fase,
             "etapas_pre_definidas": parse_etapas(self.etapas_pre_definidas),
+            # Índice da etapa atual no roadmap (-1 = fase atual fora do roadmap).
+            # Etapas até este índice já foram cumpridas e não podem ser alteradas.
+            "indice_fase_atual": self.calcular_indice_fase_atual() if self.fase_atual_id else -1,
             "has_proxima_etapa": self.has_proxima_etapa(),
             "funcionarios_fase_atual": [
                 {"id": f.id_func, "nome": f.nome}
