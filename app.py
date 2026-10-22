@@ -13,6 +13,11 @@ from models import (
 from auth import get_usuario_logado, requer_login, requer_perfil, requer_perfil_api, get_abas_usuario
 from notifications import notificar_atribuicao, notificar_mudanca_fase
 from sla_checker import verificar_sla_projetos
+from prioridades import (
+    renumerar_prioridades, definir_ordem, mover_para_posicao, fila_funcionario,
+    FilaDesatualizada,
+)
+from schema import ensure_schema
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +28,7 @@ bcrypt = Bcrypt(app)
 
 with app.app_context():
     db.create_all()
+    ensure_schema()
 
 # ─── SLA Scheduler ────────────────────────────────────────────────────────────
 
@@ -101,6 +107,12 @@ def kanban_page():
 @requer_perfil("admin", "gestor")
 def admin_page():
     return render_template("admin.html")
+
+
+@app.route("/prioridades")
+@requer_perfil("admin", "gestor")
+def prioridades_page():
+    return render_template("prioridades.html")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -543,7 +555,9 @@ def api_editar_projeto(pid):
 @requer_perfil_api("admin")
 def api_deletar_projeto(pid):
     p = Projeto.query.get_or_404(pid)
+    afetados = _funcionarios_com_trabalho_atual([o.id for o in p.objetos])
     db.session.delete(p)
+    renumerar_prioridades(*afetados)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -575,11 +589,7 @@ def api_editar_objeto(oid):
     if "etapas_pre_definidas" in body:
         etapas = body["etapas_pre_definidas"]
         o.etapas_pre_definidas = serialize_etapas(etapas) if isinstance(etapas, list) else None
-        
-    u = get_usuario_logado()
-    if "prioridade" in body and u and u.perfil == "admin":
-        o.prioridade = int(body["prioridade"])
-        
+
     db.session.commit()
     return jsonify(o.to_dict())
 
@@ -654,8 +664,10 @@ def api_deletar_objeto(oid):
     # Verifica se é o único objeto da OS. Se sim, não deve permitir (ou excluir a OS toda)
     if o.projeto.objetos.count() <= 1:
         return jsonify({"erro": "Não é possível excluir o único módulo de uma OS. Exclua a OS inteira."}), 400
-        
+
+    afetados = _funcionarios_com_trabalho_atual([o.id])
     db.session.delete(o)
+    renumerar_prioridades(*afetados)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -678,8 +690,10 @@ def api_mover_fase(oid):
     
     # Fechar fase atual
     fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+    equipe_anterior = []
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
+        equipe_anterior = [f.id_func for f in fase_ativa.funcionarios]
         
     data_limite_fase_str = body.get("data_limite_fase")
     data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
@@ -695,6 +709,8 @@ def api_mover_fase(oid):
     o.fase_atual_id = nova_fase_id
     if body.get("responsavel_fase_id"):
         o.responsavel_id = body["responsavel_fase_id"]
+    # A fase anterior deixou de ser trabalho atual da equipe dela
+    renumerar_prioridades(*equipe_anterior)
     db.session.commit()
     
     # Notificar equipe da nova fase
@@ -752,8 +768,10 @@ def _executar_mover_proxima_fase(o, etapas_list):
 
     # Fechar fase atual
     fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+    afetados = []
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
+        afetados = [f.id_func for f in fase_ativa.funcionarios]
     
     # Determinar data_limite e responsável da nova fase
     data_limite_fase = None
@@ -783,7 +801,10 @@ def _executar_mover_proxima_fase(o, etapas_list):
         if func_pre:
             db.session.flush()
             of.funcionarios.append(func_pre)
-    
+            afetados.append(func_pre.id_func)
+
+    # Equipe anterior libera a posição; funcionário pré-definido entra no fim da fila
+    renumerar_prioridades(*afetados)
     db.session.commit()
     
     # Notificar equipe da nova fase
@@ -819,6 +840,8 @@ def api_atribuir_funcionario(of_id):
     if funcionario in of.funcionarios:
         return jsonify({"erro": "Funcionário já atribuído a esta fase"}), 409
     of.funcionarios.append(funcionario)
+    if of.data_saida is None:
+        renumerar_prioridades(funcionario.id_func)  # entra no fim da fila
     db.session.commit()
     # Notificar
     objeto = db.session.get(Objeto, of.objeto_id)
@@ -835,6 +858,7 @@ def api_remover_funcionario_fase(of_id):
     funcionario = Funcionario.query.get_or_404(func_id)
     if funcionario in of.funcionarios:
         of.funcionarios.remove(funcionario)
+        renumerar_prioridades(funcionario.id_func)
         db.session.commit()
         
         # Após remoção, verificar se todos os restantes já aprovaram
@@ -891,6 +915,8 @@ def _aprovar_fase_funcionario(fase_ativa, usuario, objeto):
             )
         ).values(aprovado_em=datetime.utcnow())
     )
+    # Trabalho aprovado deixa de ocupar posição na fila do funcionário
+    renumerar_prioridades(funcionario.id_func)
     db.session.commit()
     
     # Buscar o objeto se não fornecido
@@ -978,10 +1004,111 @@ def api_reatribuir_fase(oid):
                         "erro": f"O funcionário '{func.nome}' não possui as funções exigidas. Funções necessárias: {nomes_exigidas}"
                     }), 400
             novos_funcs.append(func)
+        afetados = {f.id_func for f in fase_ativa.funcionarios} | {f.id_func for f in novos_funcs}
         fase_ativa.funcionarios = novos_funcs
+        renumerar_prioridades(*afetados)
 
     db.session.commit()
     return jsonify(o.to_dict(include_historico=True))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  API: Prioridades (fila numérica por funcionário)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _funcionarios_com_trabalho_atual(objeto_ids):
+    """IDs dos funcionários na fase ativa dos objetos informados (antes de excluí-los)."""
+    if not objeto_ids:
+        return set()
+    rows = db.session.execute(
+        db.select(objeto_fase_funcionario.c.id_funcionario)
+        .join(ObjetoFase, ObjetoFase.id == objeto_fase_funcionario.c.id_objeto_fase)
+        .where(ObjetoFase.objeto_id.in_(objeto_ids), ObjetoFase.data_saida.is_(None))
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def _item_fila(of, prioridade):
+    o = of.objeto
+    dias_restantes = of.dias_restantes_sla()
+    return {
+        "objeto_fase_id": of.id,
+        "objeto_id": o.id,
+        "prioridade": prioridade,
+        "os": o.projeto.os if o.projeto else "",
+        "projeto_nome": o.projeto.nome if o.projeto else "",
+        "cliente": o.projeto.cliente if o.projeto else "",
+        "modulo": o.nome,
+        "fase_nome": of.fase.nome_fase if of.fase else "",
+        "fase_cor": of.fase.cor if of.fase else "#94a3b8",
+        "data_limite_fase": of.data_limite.isoformat() if of.data_limite else None,
+        "dias_restantes_fase": dias_restantes,
+        "data_limite_modulo": o.data_limite.isoformat() if o.data_limite else None,
+        "dias_restantes_modulo": o.dias_restantes_sla(),
+        "dias_na_fase": of.dias_na_fase(),
+    }
+
+
+def _fila_dict(func):
+    ids = fila_funcionario(func.id_func)
+    fases = {of.id: of for of in ObjetoFase.query.filter(ObjetoFase.id.in_(ids)).all()} if ids else {}
+    return {
+        "funcionario": {
+            "id": func.id_func,
+            "nome": func.nome,
+            "funcoes": [f.nome_funcao for f in func.funcoes],
+        },
+        "itens": [_item_fila(fases[of_id], pos) for pos, of_id in enumerate(ids, start=1)],
+    }
+
+
+@app.route("/api/prioridades", methods=["GET"])
+@requer_perfil_api("admin", "gestor")
+def api_listar_prioridades():
+    """Fila de trabalhos atuais de todos os funcionários."""
+    funcs = Funcionario.query.order_by(Funcionario.nome).all()
+    return jsonify([_fila_dict(f) for f in funcs])
+
+
+@app.route("/api/prioridades/<int:fid>", methods=["GET"])
+@requer_perfil_api("admin", "gestor")
+def api_prioridades_funcionario(fid):
+    return jsonify(_fila_dict(Funcionario.query.get_or_404(fid)))
+
+
+@app.route("/api/prioridades/<int:fid>", methods=["PUT"])
+@requer_perfil_api("admin")
+def api_definir_prioridades(fid):
+    """Reordena a fila inteira. Body: {"ordem": [objeto_fase_id, ...]} (1º = prioridade 1)."""
+    func = Funcionario.query.get_or_404(fid)
+    body = request.get_json() or {}
+    try:
+        definir_ordem(fid, body.get("ordem") or [])
+    except FilaDesatualizada as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e), "fila": _fila_dict(func)}), 409
+    db.session.commit()
+    return jsonify(_fila_dict(func))
+
+
+@app.route("/api/prioridades/<int:fid>/mover", methods=["POST"])
+@requer_perfil_api("admin")
+def api_mover_prioridade(fid):
+    """Move um trabalho para uma posição. Body: {"objeto_fase_id": int, "posicao": int}."""
+    func = Funcionario.query.get_or_404(fid)
+    body = request.get_json() or {}
+    try:
+        of_id = int(body.get("objeto_fase_id"))
+        posicao = int(body.get("posicao"))
+    except (TypeError, ValueError):
+        return jsonify({"erro": "objeto_fase_id e posicao são obrigatórios"}), 400
+    try:
+        mover_para_posicao(fid, of_id, posicao)
+    except FilaDesatualizada as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e), "fila": _fila_dict(func)}), 409
+    db.session.commit()
+    return jsonify(_fila_dict(func))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
