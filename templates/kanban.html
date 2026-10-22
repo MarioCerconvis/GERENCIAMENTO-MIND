@@ -283,7 +283,29 @@
         </div>
     </div>
 </div>
+
+<!-- Modal: Roadmap e módulos da OS (fica por cima do detalhe do card) -->
+<div class="modal-overlay" id="modal-roadmap" style="display:none;">
+    <div class="modal-card modal-xl">
+        <div class="modal-header">
+            <div>
+                <h2 id="rm-titulo">Roadmap e módulos</h2>
+                <h3 id="rm-subtitulo" style="font-size: 14px; color: #64748b; margin-top: 4px; font-weight: 500;"></h3>
+            </div>
+            <button class="modal-close" onclick="fecharModal('modal-roadmap')" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="rm-layout">
+                <nav class="rm-modulos" id="rm-modulos" aria-label="Módulos da OS"></nav>
+                <section class="rm-painel" id="rm-painel"></section>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-roadmap')">Fechar</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/kanban.js?v=9"></script>
+<script src="/static/js/kanban.js?v=10"></script>
 {% endblock %}

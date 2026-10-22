@@ -481,7 +481,11 @@ def api_criar_projeto():
         # Se não enviou nome, usa nome padrão
         nome_obj = obj_data.get("nome", "").strip() or "Módulo 1"
 
-        etapas = obj_data.get("etapas_pre_definidas")
+        try:
+            etapas = normalizar_etapas(obj_data.get("etapas_pre_definidas"))
+        except RoadmapInvalido as e:
+            db.session.rollback()
+            return jsonify({"erro": f"Módulo '{nome_obj}': {e}"}), 400
         # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
         if isinstance(etapas, list) and fase_id:
             if not etapas or etapas[0].get("fase_id") != fase_id:
@@ -549,6 +553,97 @@ def api_deletar_projeto(pid):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Roadmap (etapas pré-definidas): validação
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RoadmapInvalido(ValueError):
+    pass
+
+
+def _data_iso_ou_none(valor, rotulo):
+    if not valor:
+        return None
+    try:
+        return date.fromisoformat(str(valor)).isoformat()
+    except ValueError:
+        raise RoadmapInvalido(f"{rotulo}: data inválida ({valor}).")
+
+
+def normalizar_etapas(etapas):
+    """Valida e padroniza a lista de etapas recebida da UI.
+
+    Cada etapa precisa de uma fase existente; o funcionário (opcional) precisa
+    existir e ter uma das funções exigidas pela fase.
+    """
+    if etapas is None:
+        return None
+    if not isinstance(etapas, list):
+        raise RoadmapInvalido("O roadmap deve ser uma lista de etapas.")
+
+    resultado = []
+    for i, etapa in enumerate(etapas, start=1):
+        if not isinstance(etapa, dict):
+            raise RoadmapInvalido(f"Etapa {i}: formato inválido.")
+        try:
+            fase_id = int(etapa.get("fase_id") or 0)
+        except (TypeError, ValueError):
+            fase_id = 0
+        fase = db.session.get(Fase, fase_id) if fase_id else None
+        if not fase:
+            raise RoadmapInvalido(f"Etapa {i}: selecione uma fase válida.")
+
+        func_id = etapa.get("funcionario_id") or None
+        if func_id:
+            try:
+                func = db.session.get(Funcionario, int(func_id))
+            except (TypeError, ValueError):
+                func = None
+            if not func:
+                raise RoadmapInvalido(f"Etapa {i}: funcionário não encontrado.")
+            if fase.funcoes_exigidas:
+                exigidas = {f.id_funcao for f in fase.funcoes_exigidas}
+                if not exigidas.intersection(f.id_funcao for f in func.funcoes):
+                    nomes = ", ".join(f.nome_funcao for f in fase.funcoes_exigidas)
+                    raise RoadmapInvalido(
+                        f"Etapa {i} ({fase.nome_fase}): {func.nome} não possui as funções exigidas ({nomes})."
+                    )
+            func_id = func.id_func
+
+        resultado.append({
+            "fase_id": fase.id_fase,
+            "data_limite": _data_iso_ou_none(etapa.get("data_limite"), f"Etapa {i}"),
+            "funcionario_id": func_id,
+        })
+    return resultado
+
+
+def validar_roadmap_editado(objeto, novas_etapas):
+    """Garante que a edição só altera etapas futuras.
+
+    As etapas já cumpridas e a etapa atual (até indice_fase_atual) precisam
+    continuar iguais e na mesma posição: o cálculo da próxima fase depende delas.
+    Etapas futuras novas não podem usar fases desativadas.
+    """
+    antigas = parse_etapas(objeto.etapas_pre_definidas)
+    idx = objeto.calcular_indice_fase_atual() if objeto.fase_atual_id and antigas else -1
+
+    if idx >= 0:
+        travadas = [e["fase_id"] for e in antigas[:idx + 1]]
+        if [e["fase_id"] for e in novas_etapas[:idx + 1]] != travadas:
+            raise RoadmapInvalido(
+                "As etapas já cumpridas e a etapa atual não podem ser alteradas, removidas ou reordenadas."
+            )
+        # Mantém os dados originais das etapas travadas
+        novas_etapas[:idx + 1] = antigas[:idx + 1]
+
+    for i, etapa in enumerate(novas_etapas[idx + 1:], start=idx + 2):
+        fase = db.session.get(Fase, etapa["fase_id"])
+        if fase.ativa == False:
+            raise RoadmapInvalido(f"Etapa {i}: a fase '{fase.nome_fase}' está desativada.")
+    return novas_etapas
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  API: OBJETOS (Cards Individuais)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -573,9 +668,14 @@ def api_editar_objeto(oid):
     if "responsavel_id" in body:
         o.responsavel_id = body["responsavel_id"]
     if "etapas_pre_definidas" in body:
-        etapas = body["etapas_pre_definidas"]
-        o.etapas_pre_definidas = serialize_etapas(etapas) if isinstance(etapas, list) else None
-        
+        try:
+            etapas = normalizar_etapas(body["etapas_pre_definidas"]) or []
+            etapas = validar_roadmap_editado(o, etapas)
+        except RoadmapInvalido as e:
+            db.session.rollback()
+            return jsonify({"erro": str(e)}), 400
+        o.etapas_pre_definidas = serialize_etapas(etapas)
+
     u = get_usuario_logado()
     if "prioridade" in body and u and u.perfil == "admin":
         o.prioridade = int(body["prioridade"])
@@ -598,11 +698,21 @@ def api_criar_objeto(pid):
         return jsonify({"erro": "Nome do módulo é obrigatório"}), 400
         
     fase_id = body.get("fase_id")
+    if fase_id:
+        fase_inicial = db.session.get(Fase, fase_id)
+        if not fase_inicial or fase_inicial.ativa == False:
+            return jsonify({"erro": "Fase inicial inválida ou desativada."}), 400
     data_limite_str = body.get("data_limite")
-    data_limite = date.fromisoformat(data_limite_str) if data_limite_str else p.data_limite
-    responsavel_id = body.get("responsavel_id", p.responsavel_id)
+    try:
+        data_limite = date.fromisoformat(data_limite_str) if data_limite_str else p.data_limite
+    except ValueError:
+        return jsonify({"erro": "Data limite do módulo inválida."}), 400
+    responsavel_id = body.get("responsavel_id") or p.responsavel_id
 
-    etapas = body.get("etapas_pre_definidas")
+    try:
+        etapas = normalizar_etapas(body.get("etapas_pre_definidas"))
+    except RoadmapInvalido as e:
+        return jsonify({"erro": str(e)}), 400
     # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
     if isinstance(etapas, list) and fase_id:
         if not etapas or etapas[0].get("fase_id") != fase_id:
@@ -633,8 +743,10 @@ def api_criar_objeto(pid):
     db.session.flush()
 
     if fase_id:
-        data_limite_fase_str = body.get("fase_data_limite")
-        data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
+        # Prazo da fase inicial: o informado, senão o da 1ª etapa, senão o do módulo
+        # (mesma regra da criação da OS)
+        data_limite_fase_str = body.get("fase_data_limite") or (etapas[0].get("data_limite") if etapas else None)
+        data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else data_limite
         of = ObjetoFase(
             objeto_id=novo_obj.id,
             id_fase=fase_id,
@@ -654,7 +766,11 @@ def api_deletar_objeto(oid):
     # Verifica se é o único objeto da OS. Se sim, não deve permitir (ou excluir a OS toda)
     if o.projeto.objetos.count() <= 1:
         return jsonify({"erro": "Não é possível excluir o único módulo de uma OS. Exclua a OS inteira."}), 400
-        
+
+    # Comentários do módulo continuam na OS (evita violar a FK comentarios.objeto_id)
+    Comentario.query.filter_by(objeto_id=oid).update(
+        {"objeto_id": None, "projeto_id": o.projeto_id}, synchronize_session=False
+    )
     db.session.delete(o)
     db.session.commit()
     return jsonify({"ok": True})

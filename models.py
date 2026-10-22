@@ -372,6 +372,9 @@ class Objeto(db.Model):
             },
             "sla_fase": sla_fase,
             "etapas_pre_definidas": parse_etapas(self.etapas_pre_definidas),
+            # Índice da etapa atual no roadmap (-1 = fase atual fora do roadmap).
+            # Etapas até este índice já foram cumpridas e não podem ser alteradas.
+            "indice_fase_atual": self.calcular_indice_fase_atual() if self.fase_atual_id else -1,
             "has_proxima_etapa": self.has_proxima_etapa(),
             "funcionarios_fase_atual": [
                 {"id": f.id_func, "nome": f.nome}

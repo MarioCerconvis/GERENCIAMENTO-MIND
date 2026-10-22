@@ -939,74 +939,47 @@ async function openDetail(objetoId) {
         ${p.projeto_comentario ? `<div class="detail-item" style="margin-bottom:16px;"><span class="detail-label">Comentário MACRO</span><span class="detail-value" style="white-space: pre-wrap;">${p.projeto_comentario}</span></div>` : ""}
     `;
 
-    // ── Roadmap Pré-Definido ──
-    const etapas = p.etapas_pre_definidas;
-    if (etapas && Array.isArray(etapas) && etapas.length > 0) {
-        // Determinar o índice da fase atual no roadmap
-        let currentIdx = -1;
-        const etapaIds = etapas.map(e => e.fase_id);
-        if (p.fase_atual_id) {
-            currentIdx = etapaIds.lastIndexOf(p.fase_atual_id);
-        }
-        const canEdit = ["admin", "gestor"].includes(currentUser?.perfil);
-
-        html += `<div class="detail-section-title">Roadmap Pré-Definido</div>`;
-        html += `<div id="roadmap-editor" data-objeto-id="${p.id}" style="display:flex; flex-direction:column; gap:6px; margin-bottom:20px;">`;
+    // ── Roadmap Pré-Definido (somente leitura; edição no editor de roadmap e módulos) ──
+    const etapas = p.etapas_pre_definidas || [];
+    const canEditRoadmap = ["admin", "gestor"].includes(currentUser?.perfil);
+    if (etapas.length > 0 || canEditRoadmap) {
+        html += `
+            <div class="detail-section-header">
+                <div class="detail-section-title" style="margin:0;">Roadmap Pré-Definido</div>
+                ${canEditRoadmap ? `<button class="btn btn-ghost btn-sm" onclick="abrirEditorRoadmap(${p.id})">🗺️ Editar roadmap e módulos da OS</button>` : ""}
+            </div>
+        `;
+    }
+    if (etapas.length > 0) {
+        // Índice calculado no backend (considera o histórico quando a fase se repete)
+        const currentIdx = p.indice_fase_atual ?? -1;
+        html += `<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:20px;">`;
         etapas.forEach((etapa, idx) => {
             const faseObj = allFases.find(f => f.id === etapa.fase_id);
             const faseNome = faseObj ? faseObj.nome : `Fase #${etapa.fase_id}`;
             const faseCor = faseObj ? faseObj.cor : "#94a3b8";
             const isCurrent = (idx === currentIdx);
-            const isFuture = (currentIdx === -1) || (idx > currentIdx);
-            const funcNome = etapa.funcionario_id 
-                ? (allFuncionarios.find(f => f.id === etapa.funcionario_id)?.nome || "—") 
+            const isDone = currentIdx !== -1 && idx < currentIdx;
+            const funcNome = etapa.funcionario_id
+                ? (allFuncionarios.find(f => f.id === etapa.funcionario_id)?.nome || "—")
                 : "—";
             const dataLim = etapa.data_limite ? formatDate(etapa.data_limite) : "—";
-
-            if (canEdit && isFuture && !isCurrent) {
-                // Editable row for future steps
-                const funcOptions = allFuncionarios.map(f => `<option value="${f.id}" ${f.id === etapa.funcionario_id ? 'selected' : ''}>${f.nome}</option>`).join("");
-                html += `
-                    <div class="roadmap-step" data-step-idx="${idx}" style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--bg-primary); border:1px dashed var(--border); border-radius:var(--radius); flex-wrap:wrap;">
-                        <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${idx + 1}</span>
-                        <div style="flex:1;min-width:100px;">
-                            <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome}</div>
-                        </div>
-                        <input type="date" class="roadmap-step-data" value="${etapa.data_limite || ''}" style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; min-width:130px;" title="Prazo esperado">
-                        <select class="roadmap-step-func input-select" style="min-width:140px; font-size:13px;" title="Funcionário pré-definido" onchange="onRoadmapFaseChange(this, ${etapa.fase_id})">
-                            <option value="">-- Funcionário --</option>
-                            ${funcOptions}
-                        </select>
-                        <span style="font-size:11px;color:var(--text-muted);background:rgba(99,102,241,0.1);padding:2px 8px;border-radius:10px;">✏️ Editável</span>
-                    </div>
-                `;
-            } else {
-                // Read-only row (past or current)
-                html += `
-                    <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:${isCurrent ? 'rgba(99,102,241,0.08)' : 'var(--bg-primary)'}; border:1px solid ${isCurrent ? faseCor : 'var(--border)'}; border-radius:var(--radius); ${isCurrent ? 'box-shadow: 0 0 0 2px ' + faseCor + '33;' : ''}">
-                        <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${idx + 1}</span>
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome} ${isCurrent ? '<span style="font-size:11px;background:' + faseCor + ';color:#fff;padding:1px 6px;border-radius:10px;margin-left:6px;">ATUAL</span>' : ''}</div>
-                        </div>
-                        <div style="display:flex;gap:16px;font-size:13px;color:var(--text-secondary);flex-shrink:0;">
-                            <span title="Prazo esperado">📅 ${dataLim}</span>
-                            <span title="Funcionário pré-definido">👤 ${funcNome}</span>
-                        </div>
-                    </div>
-                `;
-            }
-        });
-        html += `</div>`;
-
-        // Save button (only if there are future editable steps)
-        const hasFutureSteps = canEdit && etapas.some((_, idx) => (currentIdx === -1) || (idx > currentIdx));
-        if (hasFutureSteps) {
             html += `
-                <div style="margin-bottom:20px;">
-                    <button class="btn btn-primary btn-sm" onclick="salvarRoadmapEditado(${p.id})" style="background:#6366f1;border-color:#6366f1;">💾 Salvar Alterações do Roadmap</button>
+                <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; background:${isCurrent ? 'rgba(99,102,241,0.08)' : 'var(--bg-primary)'}; border:1px ${isCurrent || isDone ? 'solid' : 'dashed'} ${isCurrent ? faseCor : 'var(--border)'}; border-radius:var(--radius); ${isCurrent ? 'box-shadow: 0 0 0 2px ' + faseCor + '33;' : ''} ${isDone ? 'opacity:0.7;' : ''}">
+                    <span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${faseCor};color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">${isDone ? '✓' : idx + 1}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:600;font-size:14px;color:${faseCor};">${faseNome} ${isCurrent ? '<span style="font-size:11px;background:' + faseCor + ';color:#fff;padding:1px 6px;border-radius:10px;margin-left:6px;">ATUAL</span>' : ''}</div>
+                    </div>
+                    <div style="display:flex;gap:16px;font-size:13px;color:var(--text-secondary);flex-shrink:0;flex-wrap:wrap;">
+                        <span title="Prazo esperado">📅 ${dataLim}</span>
+                        <span title="Funcionário pré-definido">👤 ${funcNome}</span>
+                    </div>
                 </div>
             `;
-        }
+        });
+        html += `</div>`;
+    } else if (canEditRoadmap) {
+        html += `<p class="rm-ajuda" style="margin-bottom:20px;">Este módulo ainda não tem roadmap.</p>`;
     }
 
 
@@ -1296,65 +1269,394 @@ async function removerFuncionarioFaseAtiva(event, objetoFaseId, funcionarioId) {
     }
 }
 
-// ─── Salvar Roadmap Editado ──────────────────────────────────────────────────
+// ─── Editor de Roadmap e Módulos da OS ───────────────────────────────────────
+//
+// Abre por cima do detalhe do card. Lista os módulos da OS à esquerda e, à
+// direita, o roadmap do módulo selecionado: etapas cumpridas e a atual ficam
+// travadas (o backend também valida); as futuras podem ser editadas,
+// reordenadas, removidas e acrescentadas. Também permite criar e remover módulos.
 
-async function salvarRoadmapEditado(objetoId) {
-    const container = document.getElementById("roadmap-editor");
-    if (!container) return;
+const MAX_MODULOS_OS = 6;
+const rm = {
+    projeto: null,        // OS com objetos (GET /api/projetos/:id)
+    selecionado: null,    // id do módulo ou "novo"
+    etapas: [],           // cópia editável do roadmap do módulo selecionado
+    novo: {},             // campos do formulário de novo módulo (sobrevivem ao re-render)
+    dirty: false,
+    objetoOrigem: null,   // card a partir do qual o editor foi aberto
+};
+const elegiveisCache = {};
 
-    // Rebuild the full etapas array from the roadmap editor
-    // Non-editable steps keep their original data, editable steps get new values
-    const allSteps = container.querySelectorAll("[data-step-idx], [style*='box-shadow']");
-    
-    // Fetch current object data to get the original etapas
-    const objRes = await fetch(`/api/objetos/${objetoId}`);
-    if (!objRes.ok) { showToast("Erro ao buscar dados do módulo", "error"); return; }
-    const objData = await objRes.json();
-    const etapasOriginais = objData.etapas_pre_definidas || [];
+function escHtml(valor) {
+    return String(valor ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+}
 
-    // Update only the editable steps
-    const editableSteps = container.querySelectorAll(".roadmap-step[data-step-idx]");
-    editableSteps.forEach(step => {
-        const idx = parseInt(step.dataset.stepIdx);
-        if (idx >= 0 && idx < etapasOriginais.length) {
-            const dataInput = step.querySelector(".roadmap-step-data");
-            const funcSelect = step.querySelector(".roadmap-step-func");
-            etapasOriginais[idx].data_limite = dataInput?.value || null;
-            etapasOriginais[idx].funcionario_id = funcSelect?.value ? parseInt(funcSelect.value) : null;
-        }
-    });
+async function funcionariosElegiveis(faseId) {
+    if (!faseId) return allFuncionarios;
+    if (!elegiveisCache[faseId]) {
+        const res = await fetch(`/api/fases/${faseId}/funcionarios-elegiveis`);
+        elegiveisCache[faseId] = res.ok ? await res.json() : allFuncionarios;
+    }
+    return elegiveisCache[faseId];
+}
 
-    const res = await fetch(`/api/objetos/${objetoId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ etapas_pre_definidas: etapasOriginais }),
-    });
+async function abrirEditorRoadmap(objetoId) {
+    await loadSelectData();
+    const res = await fetch(`/api/objetos/${objetoId}`);
+    if (!res.ok) { showToast("Erro ao carregar o módulo", "error"); return; }
+    const objeto = await res.json();
+    rm.objetoOrigem = objetoId;
+    rm.dirty = false;
+    if (!(await carregarProjetoRoadmap(objeto.projeto_id))) return;
+    abrirModal("modal-roadmap");
+    await selecionarModuloRoadmap(objetoId, true);
+}
 
-    if (res.ok) {
-        showToast("Roadmap atualizado com sucesso!", "success");
-        openDetail(objetoId); // Reabrir para refletir mudanças
+async function carregarProjetoRoadmap(projetoId) {
+    const res = await fetch(`/api/projetos/${projetoId}`);
+    if (!res.ok) { showToast("Erro ao carregar a OS", "error"); return false; }
+    rm.projeto = await res.json();
+    document.getElementById("rm-titulo").textContent = `Roadmap e módulos — OS ${rm.projeto.os}`;
+    document.getElementById("rm-subtitulo").textContent = rm.projeto.nome || "";
+    return true;
+}
+
+function moduloSelecionado() {
+    return (rm.projeto?.objetos || []).find(o => o.id === rm.selecionado) || null;
+}
+
+function renderModulosRoadmap() {
+    const nav = document.getElementById("rm-modulos");
+    const objetos = rm.projeto?.objetos || [];
+    const limite = objetos.length >= MAX_MODULOS_OS;
+    nav.innerHTML = `
+        ${objetos.map(o => `
+            <button type="button" class="rm-modulo-btn ${o.id === rm.selecionado ? "ativo" : ""}"
+                    onclick="selecionarModuloRoadmap(${o.id})" aria-current="${o.id === rm.selecionado}">
+                <span class="rm-modulo-nome">${escHtml(o.nome)}</span>
+                <span class="rm-modulo-fase">
+                    <span style="color:${o.fase_atual_cor};">●</span> ${escHtml(o.fase_atual_nome || "Sem fase")}
+                    · ${(o.etapas_pre_definidas || []).length} etapa(s)
+                </span>
+            </button>
+        `).join("")}
+        <button type="button" class="rm-modulo-btn rm-modulo-novo ${rm.selecionado === "novo" ? "ativo" : ""}"
+                onclick="selecionarModuloRoadmap('novo')" ${limite ? "disabled" : ""}
+                title="${limite ? `Limite de ${MAX_MODULOS_OS} módulos por OS atingido` : "Adicionar um módulo a esta OS"}">
+            + Novo módulo ${limite ? `<span class="rm-modulo-fase">Limite de ${MAX_MODULOS_OS} atingido</span>` : ""}
+        </button>
+    `;
+}
+
+async function selecionarModuloRoadmap(id, ignorarAlteracoes = false) {
+    if (!ignorarAlteracoes && rm.dirty && id !== rm.selecionado) {
+        if (!confirm("Há alterações não salvas neste roadmap. Descartar e trocar de módulo?")) return;
+    }
+    rm.selecionado = id;
+    rm.dirty = false;
+    if (id === "novo") {
+        rm.etapas = [{ fase_id: null, data_limite: null, funcionario_id: null }];
+        rm.novo = { nome: "", data_limite: "", responsavel_id: "", descricao: "" };
     } else {
-        const err = await res.json();
-        showToast(err.erro || "Erro ao salvar roadmap", "error");
+        const mod = moduloSelecionado();
+        rm.etapas = JSON.parse(JSON.stringify(mod?.etapas_pre_definidas || []));
+    }
+    renderModulosRoadmap();
+    await renderPainelRoadmap();
+}
+
+function marcarRoadmapAlterado() {
+    rm.dirty = true;
+    const status = document.getElementById("rm-status");
+    if (status) status.style.visibility = "visible";
+}
+
+// Índice da última etapa travada (cumprida ou atual). -1 = tudo editável
+function indiceTravado() {
+    if (rm.selecionado === "novo") return -1;
+    return moduloSelecionado()?.indice_fase_atual ?? -1;
+}
+
+async function linhaEtapaEditavel(etapa, idx, total, travado) {
+    const elegiveis = await funcionariosElegiveis(etapa.fase_id);
+    const faseOpts = allFases.map(f =>
+        `<option value="${f.id}" ${f.id === etapa.fase_id ? "selected" : ""}>${escHtml(f.nome)}</option>`
+    ).join("");
+    const funcOpts = elegiveis.map(f =>
+        `<option value="${f.id}" ${f.id === etapa.funcionario_id ? "selected" : ""}>${escHtml(f.nome)}</option>`
+    ).join("");
+    const primeiraEditavel = idx === travado + 1;
+    const ehFaseInicial = rm.selecionado === "novo" && idx === 0;
+    return `
+        <li class="rm-etapa" data-idx="${idx}">
+            <span class="rm-etapa-num">${idx + 1}</span>
+            <div class="rm-etapa-campos">
+                <label class="rm-campo">
+                    <span>${ehFaseInicial ? "Fase inicial *" : "Fase *"}</span>
+                    <select class="input-select" onchange="alterarEtapaRoadmap(${idx}, 'fase_id', this.value)">
+                        <option value="">-- Fase --</option>${faseOpts}
+                    </select>
+                </label>
+                <label class="rm-campo">
+                    <span>Prazo previsto</span>
+                    <input type="date" value="${etapa.data_limite || ""}" onchange="alterarEtapaRoadmap(${idx}, 'data_limite', this.value)">
+                </label>
+                <label class="rm-campo">
+                    <span>Funcionário</span>
+                    <select class="input-select" onchange="alterarEtapaRoadmap(${idx}, 'funcionario_id', this.value)">
+                        <option value="">-- A definir --</option>${funcOpts}
+                    </select>
+                </label>
+            </div>
+            <div class="rm-etapa-acoes">
+                <button type="button" class="rm-seta" onclick="moverEtapaRoadmap(${idx}, -1)" ${primeiraEditavel ? "disabled" : ""} aria-label="Mover etapa ${idx + 1} para cima">▲</button>
+                <button type="button" class="rm-seta" onclick="moverEtapaRoadmap(${idx}, 1)" ${idx === total - 1 ? "disabled" : ""} aria-label="Mover etapa ${idx + 1} para baixo">▼</button>
+                <button type="button" class="rm-seta rm-remover" onclick="removerEtapaRoadmap(${idx})" aria-label="Remover etapa ${idx + 1}">✕</button>
+            </div>
+        </li>
+    `;
+}
+
+function linhaEtapaTravada(etapa, idx, atual) {
+    const fase = allFases.find(f => f.id === etapa.fase_id);
+    const cor = fase?.cor || "#94a3b8";
+    const func = allFuncionarios.find(f => f.id === etapa.funcionario_id);
+    return `
+        <li class="rm-etapa travada ${atual ? "atual" : ""}" style="--fase-cor:${cor};">
+            <span class="rm-etapa-num" style="background:${cor};color:#fff;">${atual ? idx + 1 : "✓"}</span>
+            <div class="rm-etapa-campos">
+                <span class="rm-etapa-fase" style="color:${cor};">${escHtml(fase?.nome || `Fase #${etapa.fase_id}`)}</span>
+                <span class="rm-etapa-info">📅 ${etapa.data_limite ? formatDate(etapa.data_limite) : "—"}</span>
+                <span class="rm-etapa-info">👤 ${escHtml(func?.nome || "—")}</span>
+            </div>
+            <span class="rm-etapa-tag">${atual ? "Atual" : "Cumprida"} 🔒</span>
+        </li>
+    `;
+}
+
+async function renderPainelRoadmap() {
+    const painel = document.getElementById("rm-painel");
+    const novo = rm.selecionado === "novo";
+    const mod = moduloSelecionado();
+    const travado = indiceTravado();
+    const isAdmin = currentUser?.perfil === "admin";
+    const unico = (rm.projeto?.objetos || []).length <= 1;
+
+    const linhas = [];
+    for (let idx = 0; idx < rm.etapas.length; idx++) {
+        linhas.push(idx <= travado
+            ? linhaEtapaTravada(rm.etapas[idx], idx, idx === travado)
+            : await linhaEtapaEditavel(rm.etapas[idx], idx, rm.etapas.length, travado));
+    }
+
+    let cabecalho;
+    if (novo) {
+        const respOpts = allFuncionarios.map(f =>
+            `<option value="${f.id}" ${String(f.id) === rm.novo.responsavel_id ? "selected" : ""}>${escHtml(f.nome)}</option>`
+        ).join("");
+        cabecalho = `
+            <div class="rm-painel-header"><h3>Novo módulo</h3></div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="rm-novo-nome">Nome do módulo *</label>
+                    <input type="text" id="rm-novo-nome" value="${escHtml(rm.novo.nome)}" oninput="rm.novo.nome = this.value; marcarRoadmapAlterado()">
+                </div>
+                <div class="form-group">
+                    <label for="rm-novo-data">Data limite do módulo</label>
+                    <input type="date" id="rm-novo-data" value="${rm.novo.data_limite}" onchange="rm.novo.data_limite = this.value; marcarRoadmapAlterado()">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="rm-novo-resp">Responsável</label>
+                    <select id="rm-novo-resp" onchange="rm.novo.responsavel_id = this.value"><option value="">(Mesmo da OS se vazio)</option>${respOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="rm-novo-desc">Descrição</label>
+                    <input type="text" id="rm-novo-desc" value="${escHtml(rm.novo.descricao)}" oninput="rm.novo.descricao = this.value">
+                </div>
+            </div>
+            <p class="rm-ajuda">A primeira etapa é a fase em que o módulo começa.</p>
+        `;
+    } else {
+        const foraDoRoadmap = mod?.fase_atual_id && travado === -1 && rm.etapas.length > 0;
+        cabecalho = `
+            <div class="rm-painel-header">
+                <div>
+                    <h3>${escHtml(mod?.nome)}</h3>
+                    <div class="rm-sub">
+                        Fase atual: <span style="color:${mod?.fase_atual_cor};">●</span> ${escHtml(mod?.fase_atual_nome || "Sem fase")}
+                        · Prazo do módulo: ${formatDate(mod?.data_limite)}
+                    </div>
+                </div>
+                ${isAdmin ? `
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removerModuloRoadmap(${mod?.id})"
+                            ${unico ? "disabled title='Uma OS precisa de ao menos um módulo. Para remover, exclua a OS.'" : ""}>
+                        Remover módulo
+                    </button>` : ""}
+            </div>
+            <p class="rm-ajuda">Etapas cumpridas e a etapa atual ficam travadas 🔒. As próximas podem ser editadas, reordenadas ou removidas.</p>
+            ${foraDoRoadmap ? `<p class="rm-aviso">A fase atual (${escHtml(mod.fase_atual_nome)}) não faz parte do roadmap: ao concluir, o card irá para a etapa 1.</p>` : ""}
+        `;
+    }
+
+    painel.innerHTML = `
+        ${cabecalho}
+        <ol class="rm-etapas">
+            ${linhas.join("") || `<li class="rm-vazio">Nenhuma etapa. Adicione a primeira abaixo.</li>`}
+        </ol>
+        <button type="button" class="btn btn-ghost rm-adicionar" onclick="adicionarEtapaRoadmap()">+ Adicionar etapa</button>
+        <div class="rm-painel-rodape">
+            <span id="rm-status" class="rm-status" style="visibility:${rm.dirty ? "visible" : "hidden"};">Alterações não salvas</span>
+            ${novo ? "" : `<button type="button" class="btn btn-ghost" onclick="descartarRoadmap()">Descartar</button>`}
+            <button type="button" class="btn btn-primary" id="rm-salvar" onclick="${novo ? "criarModuloRoadmap()" : "salvarRoadmap()"}">
+                ${novo ? "Criar módulo" : "Salvar roadmap"}
+            </button>
+        </div>
+    `;
+}
+
+async function alterarEtapaRoadmap(idx, campo, valor) {
+    const etapa = rm.etapas[idx];
+    if (!etapa) return;
+    if (campo === "data_limite") {
+        etapa.data_limite = valor || null;
+    } else {
+        etapa[campo] = valor ? parseInt(valor) : null;
+    }
+    marcarRoadmapAlterado();
+    if (campo === "fase_id") {
+        // Funcionário escolhido pode não ter as funções exigidas pela nova fase
+        const elegiveis = await funcionariosElegiveis(etapa.fase_id);
+        if (etapa.funcionario_id && !elegiveis.some(f => f.id === etapa.funcionario_id)) {
+            const nome = allFuncionarios.find(f => f.id === etapa.funcionario_id)?.nome || "O funcionário";
+            etapa.funcionario_id = null;
+            showToast(`${nome} não tem as funções exigidas por essa fase e foi removido da etapa ${idx + 1}.`, "error");
+        }
+        await renderPainelRoadmap();
     }
 }
 
-// ─── Filtrar funcionários elegíveis no roadmap por fase ──────────────────────
+async function moverEtapaRoadmap(idx, direcao) {
+    const destino = idx + direcao;
+    if (destino <= indiceTravado() || destino >= rm.etapas.length) return;
+    [rm.etapas[idx], rm.etapas[destino]] = [rm.etapas[destino], rm.etapas[idx]];
+    marcarRoadmapAlterado();
+    await renderPainelRoadmap();
+}
 
-async function onRoadmapFaseChange(selectEl, faseId) {
-    if (!faseId) return;
-    try {
-        const res = await fetch(`/api/fases/${faseId}/funcionarios-elegiveis`);
-        if (res.ok) {
-            const currentValue = selectEl.value;
-            const elegiveis = await res.json();
-            const opts = elegiveis.map(f => `<option value="${f.id}" ${f.id == currentValue ? 'selected' : ''}>${f.nome}</option>`).join("");
-            selectEl.innerHTML = `<option value="">-- Funcionário --</option>${opts}`;
-            if (currentValue) selectEl.value = currentValue;
-        }
-    } catch (e) {
-        console.error("Erro ao buscar funcionários elegíveis:", e);
+async function removerEtapaRoadmap(idx) {
+    if (idx <= indiceTravado()) return;
+    rm.etapas.splice(idx, 1);
+    marcarRoadmapAlterado();
+    await renderPainelRoadmap();
+}
+
+async function adicionarEtapaRoadmap() {
+    rm.etapas.push({ fase_id: null, data_limite: null, funcionario_id: null });
+    marcarRoadmapAlterado();
+    await renderPainelRoadmap();
+    document.querySelector("#rm-painel .rm-etapa:last-child select")?.focus();
+}
+
+async function descartarRoadmap() {
+    await selecionarModuloRoadmap(rm.selecionado, true);
+}
+
+function validarEtapasRoadmap() {
+    const semFase = rm.etapas.findIndex(e => !e.fase_id);
+    if (semFase !== -1) {
+        showToast(`Selecione a fase da etapa ${semFase + 1}.`, "error");
+        return false;
     }
+    return true;
+}
+
+async function aposAlterarProjetoRoadmap(selecionar) {
+    await carregarProjetoRoadmap(rm.projeto.id);
+    await selecionarModuloRoadmap(selecionar, true);
+    await loadBoard();
+}
+
+async function salvarRoadmap() {
+    if (!validarEtapasRoadmap()) return;
+    const btn = document.getElementById("rm-salvar");
+    btn.disabled = true;
+    try {
+        const res = await fetch(`/api/objetos/${rm.selecionado}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ etapas_pre_definidas: rm.etapas }),
+        });
+        if (res.ok) {
+            showToast("Roadmap atualizado com sucesso!", "success");
+            await aposAlterarProjetoRoadmap(rm.selecionado);
+        } else {
+            const err = await res.json();
+            showToast(err.erro || "Erro ao salvar roadmap", "error");
+        }
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function criarModuloRoadmap() {
+    const nome = rm.novo.nome.trim();
+    if (!nome) { showToast("Informe o nome do módulo.", "error"); return; }
+    if (rm.etapas.length === 0) { showToast("Adicione ao menos a fase inicial.", "error"); return; }
+    if (!validarEtapasRoadmap()) return;
+
+    const body = {
+        nome,
+        descricao: rm.novo.descricao.trim(),
+        data_limite: rm.novo.data_limite || null,
+        responsavel_id: rm.novo.responsavel_id ? parseInt(rm.novo.responsavel_id) : null,
+        fase_id: rm.etapas[0].fase_id,
+        etapas_pre_definidas: rm.etapas,
+    };
+    const btn = document.getElementById("rm-salvar");
+    btn.disabled = true;
+    try {
+        const res = await fetch(`/api/projetos/${rm.projeto.id}/objetos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Módulo "${nome}" criado!`, "success");
+            await aposAlterarProjetoRoadmap(data.id);
+        } else {
+            showToast(data.erro || "Erro ao criar módulo", "error");
+        }
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function removerModuloRoadmap(objetoId) {
+    const mod = (rm.projeto?.objetos || []).find(o => o.id === objetoId);
+    if (!mod) return;
+    if (!confirm(`Remover o módulo "${mod.nome}" da OS ${rm.projeto.os}?\n\nO histórico de fases dele será apagado. Os comentários continuam na OS.`)) return;
+
+    const res = await fetch(`/api/objetos/${objetoId}`, { method: "DELETE" });
+    if (!res.ok) {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao remover módulo", "error");
+        return;
+    }
+    showToast(`Módulo "${mod.nome}" removido.`, "success");
+    if (objetoId === rm.objetoOrigem) {
+        // O card que abriu o editor não existe mais
+        fecharModal("modal-detalhe", true);
+        rm.objetoOrigem = null;
+    }
+    rm.dirty = false;
+    await carregarProjetoRoadmap(rm.projeto.id);
+    await selecionarModuloRoadmap(rm.projeto.objetos[0]?.id ?? "novo", true);
+    await loadBoard();
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1373,6 +1675,17 @@ function fecharModal(id, force = false) {
         }
     }
     
+    if (id === "modal-roadmap" && !force) {
+        if (rm.dirty && !confirm("Há alterações não salvas no roadmap. Quer sair mesmo?")) return;
+        rm.dirty = false;
+        fecharModal(id, true);
+        // Atualiza o detalhe do card que abriu o editor (se ele ainda existir)
+        if (document.getElementById("modal-detalhe").style.display !== "none" && rm.objetoOrigem) {
+            openDetail(rm.objetoOrigem);
+        }
+        return;
+    }
+
     if (id === "modal-detalhe" && !force) {
         const commentBox = document.getElementById("novo-comentario");
         if (commentBox && commentBox.value.trim() !== "") {
