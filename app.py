@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, date
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
@@ -40,6 +41,24 @@ scheduler.add_job(
     minute=Config.SLA_CHECK_MINUTE,
 )
 scheduler.start()
+
+
+# ─── Arquivos estáticos com versão ────────────────────────────────────────────
+
+@app.context_processor
+def _versao_estaticos():
+    """estatico("css/style.css") → "/static/css/style.css?v=<modificação do arquivo>".
+
+    A versão muda sempre que o arquivo muda (inclusive após um git pull), então o
+    navegador baixa o CSS/JS novo em vez de usar o que está em cache.
+    """
+    def estatico(caminho):
+        try:
+            versao = int(os.path.getmtime(os.path.join(app.static_folder, caminho)))
+        except OSError:
+            versao = 0
+        return f"/static/{caminho}?v={versao}"
+    return {"estatico": estatico}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
