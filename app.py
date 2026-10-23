@@ -1,6 +1,6 @@
 from datetime import datetime, date
 
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
 from flask_bcrypt import Bcrypt
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -11,7 +11,10 @@ from models import (
     objeto_fase_funcionario, parse_etapas, serialize_etapas,
 )
 from auth import get_usuario_logado, requer_login, requer_perfil, requer_perfil_api, get_abas_usuario
-from notifications import notificar_atribuicao, notificar_mudanca_fase
+from notifications import (
+    notificar_atribuicao, notificar_mudanca_fase, notificar_remocao, notificar_comentario,
+    notificar_prioridade, notificar_etapa_futura, processar_fila,
+)
 from sla_checker import verificar_sla_projetos
 from prioridades import (
     renumerar_prioridades, definir_ordem, mover_para_posicao, fila_funcionario,
@@ -32,14 +35,46 @@ with app.app_context():
 
 # ─── SLA Scheduler ────────────────────────────────────────────────────────────
 
+def _job_sla():
+    with app.app_context():
+        verificar_sla_projetos()
+        processar_fila()
+
+
+# Obs.: no PythonAnywhere threads não rodam em web apps, então este agendador não
+# dispara lá. Use as tarefas agendadas `flask verificar-sla` e `flask processar-emails`.
 scheduler = BackgroundScheduler()
 scheduler.add_job(
-    func=lambda: app.app_context().push() or verificar_sla_projetos(),
+    func=_job_sla,
     trigger="cron",
     hour=Config.SLA_CHECK_HOUR,
     minute=Config.SLA_CHECK_MINUTE,
 )
 scheduler.start()
+
+
+# ─── Envio de e-mails depois da resposta ──────────────────────────────────────
+
+def _processar_fila_apos_resposta():
+    with app.app_context():
+        try:
+            processar_fila()
+        except Exception as e:  # noqa: BLE001 — envio nunca derruba a requisição
+            print(f"[ERRO E-MAIL] Falha ao processar a fila: {e}")
+
+
+@app.after_request
+def _agendar_envio_emails(response):
+    """Se a requisição enfileirou e-mails, confirma a fila e envia depois que a
+    resposta foi entregue (call_on_close) — o usuário não espera o SMTP/API."""
+    if g.pop("despachar_emails", False):
+        if response.status_code < 400:
+            # Notificações enfileiradas depois do commit da ação ainda estão pendentes
+            db.session.commit()
+            response.call_on_close(_processar_fila_apos_resposta)
+        else:
+            db.session.rollback()
+    return response
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -542,6 +577,8 @@ def api_criar_projeto():
             db.session.add(of)
 
     db.session.commit()
+    for obj in novo_proj.objetos:
+        _notificar_roadmap(obj, [])
     return jsonify(novo_proj.to_dict()), 201
 
 
@@ -676,6 +713,23 @@ def validar_roadmap_editado(objeto, novas_etapas):
     return novas_etapas
 
 
+def _notificar_roadmap(objeto, etapas_antes):
+    """Avisa quem passou a estar pré-definido em alguma etapa futura do roadmap."""
+    etapas = parse_etapas(objeto.etapas_pre_definidas)
+    idx = objeto.calcular_indice_fase_atual() if objeto.fase_atual_id else -1
+    ja_estavam = {(e["fase_id"], e.get("funcionario_id")) for e in etapas_antes}
+    avisados = set()
+    for etapa in etapas[idx + 1:]:
+        chave = (etapa["fase_id"], etapa.get("funcionario_id"))
+        if not chave[1] or chave in ja_estavam or chave in avisados:
+            continue
+        avisados.add(chave)
+        func = db.session.get(Funcionario, chave[1])
+        fase = db.session.get(Fase, chave[0])
+        if func and fase:
+            notificar_etapa_futura(func, objeto, fase, etapa)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  API: OBJETOS (Cards Individuais)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -715,9 +769,14 @@ def api_editar_objeto(oid):
         except RoadmapInvalido as e:
             db.session.rollback()
             return jsonify({"erro": str(e)}), 400
+        etapas_antes = parse_etapas(o.etapas_pre_definidas)
         o.etapas_pre_definidas = serialize_etapas(etapas)
+    else:
+        etapas_antes = None
 
     db.session.commit()
+    if etapas_antes is not None:
+        _notificar_roadmap(o, etapas_antes)
     return jsonify(o.to_dict())
 
 
@@ -797,6 +856,7 @@ def api_criar_objeto(pid):
         db.session.add(of)
 
     db.session.commit()
+    _notificar_roadmap(novo_obj, [])
     return jsonify(novo_obj.to_dict()), 201
 
 
@@ -1006,6 +1066,8 @@ def api_remover_funcionario_fase(of_id):
     if funcionario in of.funcionarios:
         of.funcionarios.remove(funcionario)
         renumerar_prioridades(funcionario.id_func)
+        if of.data_saida is None:
+            notificar_remocao(funcionario, of.objeto.projeto, of.fase, of.objeto)
         db.session.commit()
         
         # Após remoção, verificar se todos os restantes já aprovaram
@@ -1130,6 +1192,8 @@ def api_reatribuir_fase(oid):
                 return jsonify({
                     "erro": f"O funcionário '{novo_resp.nome}' não possui as funções exigidas por esta fase. Funções necessárias: {nomes_exigidas}"
                 }), 400
+        if fase_ativa.responsavel_fase_id != novo_resp.id_func:
+            notificar_atribuicao(novo_resp, o.projeto, fase, o)
         fase_ativa.responsavel_fase_id = novo_resp_id
         o.responsavel_id = novo_resp_id
 
@@ -1151,7 +1215,14 @@ def api_reatribuir_fase(oid):
                         "erro": f"O funcionário '{func.nome}' não possui as funções exigidas. Funções necessárias: {nomes_exigidas}"
                     }), 400
             novos_funcs.append(func)
-        afetados = {f.id_func for f in fase_ativa.funcionarios} | {f.id_func for f in novos_funcs}
+        antigos = list(fase_ativa.funcionarios)
+        afetados = {f.id_func for f in antigos} | {f.id_func for f in novos_funcs}
+        for f in novos_funcs:
+            if f not in antigos:
+                notificar_atribuicao(f, o.projeto, fase, o)
+        for f in antigos:
+            if f not in novos_funcs:
+                notificar_remocao(f, o.projeto, fase, o)
         fase_ativa.funcionarios = novos_funcs
         renumerar_prioridades(*afetados)
 
@@ -1229,13 +1300,14 @@ def api_definir_prioridades(fid):
     """Reordena a fila inteira. Body: {"ordem": [objeto_fase_id, ...]} (1º = prioridade 1)."""
     func = Funcionario.query.get_or_404(fid)
     body = request.get_json() or {}
+    ordem_antes = fila_funcionario(fid)
     try:
         definir_ordem(fid, body.get("ordem") or [])
     except FilaDesatualizada as e:
         db.session.rollback()
         return jsonify({"erro": str(e), "fila": _fila_dict(func)}), 409
     db.session.commit()
-    return jsonify(_fila_dict(func))
+    return jsonify(_notificar_fila_alterada(func, ordem_antes))
 
 
 @app.route("/api/prioridades/<int:fid>/mover", methods=["POST"])
@@ -1249,13 +1321,25 @@ def api_mover_prioridade(fid):
         posicao = int(body.get("posicao"))
     except (TypeError, ValueError):
         return jsonify({"erro": "objeto_fase_id e posicao são obrigatórios"}), 400
+    ordem_antes = fila_funcionario(fid)
     try:
         mover_para_posicao(fid, of_id, posicao)
     except FilaDesatualizada as e:
         db.session.rollback()
         return jsonify({"erro": str(e), "fila": _fila_dict(func)}), 409
     db.session.commit()
-    return jsonify(_fila_dict(func))
+    return jsonify(_notificar_fila_alterada(func, ordem_antes))
+
+
+def _notificar_fila_alterada(func, ordem_antes):
+    """Envia a nova fila ao funcionário se a ordem mudou; devolve o dict da fila."""
+    fila = _fila_dict(func)
+    ordem_depois = [i["objeto_fase_id"] for i in fila["itens"]]
+    if ordem_depois != ordem_antes:
+        pos_antes = {of_id: i for i, of_id in enumerate(ordem_antes)}
+        mudaram = {of_id for i, of_id in enumerate(ordem_depois) if pos_antes.get(of_id) != i}
+        notificar_prioridade(func, fila["itens"], destacar_ids=mudaram)
+    return fila
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1461,6 +1545,13 @@ def api_criar_comentario_objeto(oid):
     )
     db.session.add(comentario)
     db.session.commit()
+
+    # Avisa a equipe da fase atual e o responsável pelo módulo (o autor não recebe)
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+    destinatarios = [f.email for f in (fase_ativa.funcionarios if fase_ativa else [])]
+    if obj.responsavel:
+        destinatarios.append(obj.responsavel.email)
+    notificar_comentario(obj, comentario, destinatarios)
     return jsonify(comentario.to_dict()), 201
 
 @app.route("/api/projetos/<int:pid>/comentarios", methods=["GET"])
@@ -1635,6 +1726,21 @@ with app.app_context():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, use_reloader=False)
+
+@app.cli.command("processar-emails")
+def processar_emails_command():
+    """Envia os e-mails pendentes da fila (para tarefa agendada no PythonAnywhere)."""
+    enviados, falhas = processar_fila(limite=200)
+    print(f"E-mails enviados: {enviados} | falhas: {falhas}")
+
+
+@app.cli.command("verificar-sla")
+def verificar_sla_command():
+    """Verifica SLAs vencidos e envia os avisos (para tarefa agendada diária)."""
+    verificar_sla_projetos()
+    enviados, falhas = processar_fila(limite=200)
+    print(f"SLA verificado. E-mails enviados: {enviados} | falhas: {falhas}")
+
 
 @app.cli.command("migrate-prod")
 def migrate_prod_command():

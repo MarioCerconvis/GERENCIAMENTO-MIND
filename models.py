@@ -560,6 +560,24 @@ class ObjetoFase(db.Model):
         }
 
 
+# ─── EmailPendente (fila de envio de notificações) ───────────────────────────
+
+class EmailPendente(db.Model):
+    """Fila de e-mails. As notificações são gravadas aqui junto com a ação que as
+    gerou (se a ação falhar, o e-mail some no rollback) e enviadas depois que a
+    resposta já foi entregue ao usuário. Falhas ficam na fila para nova tentativa."""
+    __tablename__ = "emails_pendentes"
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    destinatario = db.Column(db.String(150), nullable=False)
+    assunto = db.Column(db.String(255), nullable=False)
+    corpo_html = db.Column(db.Text, nullable=False)
+    tipo = db.Column(db.String(40), nullable=False, default="geral")
+    criado_em = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    enviado_em = db.Column(db.DateTime, nullable=True)  # NULL = pendente
+    tentativas = db.Column(db.Integer, default=0, nullable=False)
+    ultimo_erro = db.Column(db.Text, nullable=True)
+
+
 # ─── Comentario (independente de fase) ───────────────────────────────────────
 
 class Comentario(db.Model):
