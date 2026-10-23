@@ -66,3 +66,29 @@ The project relies on environment variables for configuration. You need a `.env`
    # OR
    flask run
    ```
+## Notificações por e-mail
+
+O funcionário recebe e-mail quando: é atribuído ou removido de uma fase, o card
+dele muda de fase, a fila de prioridades dele é alterada, alguém comenta num card
+em que ele trabalha, ou ele é incluído numa etapa futura do roadmap. Quem fez a
+ação não recebe e-mail sobre ela.
+
+Os e-mails entram numa fila (tabela `emails_pendentes`) e são enviados logo depois
+que a resposta chega ao usuário. Se o envio falhar, o e-mail fica na fila e é
+tentado de novo (até 5 vezes).
+
+**Variáveis (.env):**
+- `EMAIL_ATIVO=true` — sem isso, os e-mails só aparecem no log.
+- `EMAIL_PROVEDOR=brevo` + `BREVO_API_KEY=...` — API HTTP do Brevo. Funciona no plano
+  gratuito do PythonAnywhere (que só libera HTTP(S) para uma lista de sites).
+- ou `EMAIL_PROVEDOR=smtp` + `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` —
+  Gmail (com senha de app), Google Workspace ou outro servidor SMTP.
+- `EMAIL_REMETENTE=Gerenciamento MIND <sistema@seudominio.com.br>` — no Brevo, o
+  remetente precisa estar verificado.
+- `APP_URL=https://seu-usuario.pythonanywhere.com` — link "Abrir" nos e-mails.
+
+**Tarefas agendadas (planos pagos do PythonAnywhere):** threads não rodam em web apps
+lá, então o agendador interno de SLA não dispara. Configure na aba *Tasks*:
+- diária: `cd ~/GERENCIAMENTO-MIND && venv/bin/flask --app app verificar-sla`
+- de hora em hora: `cd ~/GERENCIAMENTO-MIND && venv/bin/flask --app app processar-emails`
+  (reenvia o que falhou)
