@@ -1165,3 +1165,604 @@ input[type="color"] {
     .kanban-board.horizontal .project-card { width: 100%; max-width: 100%; min-width: 100%; }
     .kanban-board.horizontal .column-body { flex-wrap: wrap; }
 }
+
+/* ─── Resumo da relação do funcionário em foco ───────────────────────── */
+
+.relacao-resumo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+
+.relacao-resumo-titulo {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-right: 4px;
+}
+
+.relacao-chip {
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: box-shadow var(--transition), transform var(--transition);
+}
+
+.relacao-chip:hover { transform: translateY(-1px); }
+.relacao-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.relacao-chip.ativo { box-shadow: 0 0 0 2px currentColor; }
+
+.relacao-chip-todos {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.kanban-toolbar .input-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+
+/* ─── Prioridade numérica ────────────────────────────────────────────── */
+
+.prio-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.prio-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+}
+
+.prio-total { font-weight: 500; opacity: 0.8; }
+
+.prio-1 {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.prio-2 {
+    background: rgba(249, 115, 22, 0.15);
+    color: #fb923c;
+    border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.prio-n {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+
+.prio-detalhe {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.prio-detalhe-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.prio-detalhe-linha {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.prio-detalhe-nome {
+    flex: 1;
+    font-size: 14px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.prio-detalhe-select { width: auto; min-width: 170px; }
+.prio-detalhe-info { font-size: 13px; color: var(--text-secondary); }
+
+/* ─── Tela de prioridades ────────────────────────────────────────────── */
+
+.prio-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.prio-toolbar .page-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.prio-toolbar-acoes {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.prio-toolbar-acoes .input-search { width: 220px; }
+
+.prio-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.prio-board {
+    display: flex;
+    gap: 16px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    align-items: flex-start;
+    min-height: calc(100vh - 140px);
+}
+
+.prio-coluna {
+    flex: 0 0 300px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 180px);
+}
+
+.prio-coluna.alterada { border-color: var(--warning); }
+
+.prio-coluna-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.prio-coluna-titulo {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 15px;
+}
+
+.prio-coluna-funcoes {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.prio-contador {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.prio-lista {
+    list-style: none;
+    margin: 0;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 60px;
+}
+
+.prio-vazio {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 16px 8px;
+}
+
+.prio-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--fase-cor, var(--border));
+    border-radius: var(--radius);
+    cursor: grab;
+    transition: box-shadow var(--transition), opacity var(--transition);
+}
+
+.prio-item:hover { box-shadow: var(--shadow); }
+.prio-item.arrastando { opacity: 0.4; }
+.prio-item.somente-leitura { cursor: default; }
+
+.prio-posicao {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+}
+
+.prio-item-corpo { flex: 1; min-width: 0; }
+
+.prio-item-os {
+    font-weight: 700;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.prio-item-modulo {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.prio-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.prio-fase {
+    font-weight: 600;
+    color: var(--fase-cor);
+}
+
+.prio-prazo-ok { color: var(--success); }
+.prio-prazo-alerta { color: var(--warning); }
+.prio-prazo-atraso { color: var(--danger); font-weight: 600; }
+
+.prio-item-setas {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.prio-seta {
+
+/* ─── Editor de roadmap e módulos da OS ──────────────────────────────── */
+
+.modal-xl { max-width: 980px; }
+
+.detail-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 24px 0 12px;
+}
+
+.rm-layout {
+    display: grid;
+    grid-template-columns: 230px 1fr;
+    gap: 20px;
+    align-items: start;
+}
+
+.rm-modulos {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: sticky;
+    top: 0;
+}
+
+.rm-modulo-btn {
+    font-family: var(--font);
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: border-color var(--transition), background var(--transition);
+}
+
+.rm-modulo-btn:hover:not(:disabled) { border-color: var(--accent); }
+.rm-modulo-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rm-modulo-btn.ativo { border-color: var(--accent); background: var(--accent-subtle); }
+.rm-modulo-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.rm-modulo-nome { font-weight: 600; font-size: 14px; }
+.rm-modulo-fase { font-size: 12px; color: var(--text-secondary); }
+
+.rm-modulo-novo {
+    border-style: dashed;
+    color: var(--accent-hover);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.rm-painel { min-width: 0; }
+
+.rm-painel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.rm-painel-header h3 { font-size: 17px; font-weight: 700; }
+.rm-sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+
+.rm-ajuda {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.rm-aviso {
+    font-size: 13px;
+    color: var(--warning);
+    background: var(--warning-bg);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    margin-bottom: 12px;
+}
+
+.rm-etapas {
+    list-style: none;
+    margin: 0 0 10px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rm-vazio {
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 16px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+}
+
+.rm-etapa {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+}
+
+.rm-etapa.travada {
+    border-style: solid;
+    opacity: 0.75;
+}
+
+.rm-etapa.atual {
+    opacity: 1;
+    border-color: var(--fase-cor);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--fase-cor) 20%, transparent);
+}
+
+.rm-etapa-num {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.rm-etapa-campos {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1.2fr;
+    gap: 8px;
+    align-items: end;
+}
+
+.rm-etapa.travada .rm-etapa-campos { align-items: center; }
+
+.rm-campo {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.rm-campo > span {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.rm-campo .input-select,
+.rm-campo input[type="date"] { width: 100%; min-width: 0; }
+
+.rm-etapa-fase { font-weight: 600; font-size: 14px; }
+.rm-etapa-info { font-size: 13px; color: var(--text-secondary); }
+
+.rm-etapa-tag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.rm-etapa-acoes {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.rm-seta {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    width: 24px;
+    height: 22px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.prio-seta:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border); }
+.prio-seta:focus-visible { outline: 2px solid var(--accent); }
+.prio-seta:disabled { opacity: 0.25; cursor: default; }
+
+.prio-coluna-rodape {
+    display: none;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    background: var(--warning-bg);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.prio-coluna.alterada .prio-coluna-rodape { display: flex; }
+.prio-coluna-rodape .btn { flex: 1; justify-content: center; }
+
+@media (max-width: 768px) {
+    .prio-board { flex-direction: column; align-items: stretch; }
+    .prio-coluna { flex-basis: auto; max-height: none; }
+    .prio-toolbar-acoes .input-search { width: 100%; }
+
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.rm-seta:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border); }
+.rm-seta:focus-visible { outline: 2px solid var(--accent); }
+.rm-seta:disabled { opacity: 0.25; cursor: default; }
+.rm-seta.rm-remover:hover { color: var(--danger); border-color: var(--danger); }
+
+.rm-adicionar {
+    width: 100%;
+    justify-content: center;
+    border: 1px dashed var(--border);
+}
+
+.rm-painel-rodape {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.rm-status {
+    margin-right: auto;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--warning);
+}
+
+@media (max-width: 768px) {
+    .rm-layout { grid-template-columns: 1fr; }
+    .rm-modulos { position: static; flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+    .rm-modulo-btn { flex: 0 0 auto; max-width: 220px; }
+    .rm-etapa { flex-wrap: wrap; }
+    .rm-etapa-campos { grid-template-columns: 1fr; flex-basis: calc(100% - 40px); }
+    .rm-etapa-acoes { margin-left: auto; }
+    .rm-painel-rodape { flex-wrap: wrap; }
+}
+
+/* ─── Datas de início previstas ──────────────────────────────────────── */
+
+.inicio-alerta {
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 6px;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    line-height: 1.4;
+}
+
+.inicio-aguardando {
+    background: var(--accent-subtle);
+    color: var(--accent-hover);
+}
+
+.inicio-atrasado {
+    background: var(--warning-bg);
+    color: var(--warning);
+}
+
+.rm-datas-modulo {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 220px));
+    gap: 12px;
+    margin: 8px 0 12px;
+}
+
+.rm-datas-modulo input[type="date"] { width: 100%; }
+
+/* Etapa editável com início e prazo: grade 2x2 (fase | funcionário / início | prazo) */
+.rm-etapa:not(.travada) .rm-etapa-campos { grid-template-columns: 1fr 1fr; }
+
+@media (max-width: 768px) {
+    .rm-datas-modulo { grid-template-columns: 1fr 1fr; }
+}

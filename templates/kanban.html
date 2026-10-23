@@ -20,27 +20,29 @@
         <select class="input-select" id="kanban-filter-funcionario">
             <option value="">Todos os Funcionários</option>
         </select>
-        <select class="input-select" id="kanban-filter-prioridade">
+        <select class="input-select" id="kanban-filter-prioridade" title="Posição do card na fila de prioridade do funcionário">
             <option value="">Todas as Prioridades</option>
-            <option value="0">Sem flag</option>
-            <option value="1">🟡 Importante</option>
-            <option value="2">🟠 Prioridade</option>
-            <option value="3">🔴 Urgente</option>
+            <option value="1">🎯 Prioridade 1</option>
+            <option value="top3">Top 3</option>
+            <option value="sem">Sem prioridade</option>
         </select>
         <select class="input-select" id="kanban-filter-relacao">
-            <option value="">Meus Cards</option>
-            <option value="todos">📋 Todos os cards</option>
-            <option value="pendentes">⏳ Pendentes</option>
+            <option value="" id="kanban-filter-relacao-todos">Meus Cards</option>
+            <option value="pendentes">⏳ Atuais</option>
             <option value="concluidos">✅ Concluídos</option>
             <option value="futuros">🔮 Futuros</option>
-            <option value="pendentes_futuros">📌 Pendentes e futuros</option>
+            <option value="pendentes_futuros">📌 Atuais e futuros</option>
         </select>
         <button class="btn btn-ghost" id="btn-historico">Ver Histórico</button>
         <button class="btn btn-primary" id="btn-novo-projeto" style="display:none;">+ Novo Projeto</button>
         <button class="btn btn-ghost" id="btn-nova-fase" style="display:none;">+ Nova Fase</button>
+        <a href="/prioridades" class="btn btn-ghost" id="btn-prioridades" style="display:none;">Prioridades</a>
         <a href="/admin" class="btn btn-ghost" id="btn-admin" style="display:none;">Admin</a>
     </div>
 </div>
+
+<!-- Resumo da relação do funcionário em foco (preenchido pelo JS) -->
+<div class="relacao-resumo" id="relacao-resumo" style="display:none;"></div>
 
 <!-- Kanban Board -->
 <div class="kanban-board" id="kanban-board">
@@ -283,7 +285,29 @@
         </div>
     </div>
 </div>
+
+<!-- Modal: Roadmap e módulos da OS (fica por cima do detalhe do card) -->
+<div class="modal-overlay" id="modal-roadmap" style="display:none;">
+    <div class="modal-card modal-xl">
+        <div class="modal-header">
+            <div>
+                <h2 id="rm-titulo">Roadmap e módulos</h2>
+                <h3 id="rm-subtitulo" style="font-size: 14px; color: #64748b; margin-top: 4px; font-weight: 500;"></h3>
+            </div>
+            <button class="modal-close" onclick="fecharModal('modal-roadmap')" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="rm-layout">
+                <nav class="rm-modulos" id="rm-modulos" aria-label="Módulos da OS"></nav>
+                <section class="rm-painel" id="rm-painel"></section>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-roadmap')">Fechar</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/kanban.js?v=9"></script>
+<script src="/static/js/kanban.js?v=10"></script>
 {% endblock %}

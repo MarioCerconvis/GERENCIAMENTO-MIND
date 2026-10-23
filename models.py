@@ -35,6 +35,10 @@ objeto_fase_funcionario = db.Table(
     db.Column("id_funcionario", db.Integer, db.ForeignKey("funcionarios.id_func"), primary_key=True),
     db.Column("atribuido_em", db.DateTime, default=datetime.utcnow),
     db.Column("aprovado_em", db.DateTime, nullable=True),  # NULL = pendente, preenchido = aprovado
+    # Posição na fila de trabalhos atuais do funcionário (1 = mais importante).
+    # Só trabalhos atuais (fase ativa e ainda não aprovados pelo funcionário) têm
+    # prioridade; mantida contígua (1..n) por prioridades.renumerar_prioridades().
+    db.Column("prioridade", db.Integer, nullable=True),
 )
 
 
@@ -198,7 +202,11 @@ class Projeto(db.Model):
 def parse_etapas(raw):
     """Converte etapas_pre_definidas (CSV legado ou JSON rico) em lista padronizada.
     
-    Retorna: [{"fase_id": int, "data_limite": str|None, "funcionario_id": int|None}, ...]
+    Retorna: [{"fase_id": int, "data_inicio": str|None, "data_limite": str|None,
+               "funcionario_id": int|None}, ...]
+
+    data_inicio é o início esperado da etapa e data_limite o fim esperado. O início
+    é só uma previsão: o card só entra na etapa quando a anterior é concluída.
     """
     if not raw or not str(raw).strip():
         return []
@@ -214,11 +222,12 @@ def parse_etapas(raw):
                 if isinstance(item, dict):
                     result.append({
                         "fase_id": int(item.get("fase_id", 0)),
+                        "data_inicio": item.get("data_inicio") or None,
                         "data_limite": item.get("data_limite") or None,
                         "funcionario_id": int(item["funcionario_id"]) if item.get("funcionario_id") else None,
                     })
                 elif isinstance(item, (int, float)):
-                    result.append({"fase_id": int(item), "data_limite": None, "funcionario_id": None})
+                    result.append({"fase_id": int(item), "data_inicio": None, "data_limite": None, "funcionario_id": None})
             return result
         except (json.JSONDecodeError, ValueError, TypeError):
             return []
@@ -226,7 +235,7 @@ def parse_etapas(raw):
     # Fallback: CSV legado ("1,4,5")
     try:
         return [
-            {"fase_id": int(v.strip()), "data_limite": None, "funcionario_id": None}
+            {"fase_id": int(v.strip()), "data_inicio": None, "data_limite": None, "funcionario_id": None}
             for v in raw.split(",") if v.strip()
         ]
     except ValueError:
@@ -249,10 +258,15 @@ class Objeto(db.Model):
     nome = db.Column(db.String(200), nullable=False)
     descricao = db.Column(db.Text, nullable=True)
     data_limite = db.Column(db.Date, nullable=False) # SLA do objeto
+    # Início esperado do módulo. Informativo: não move o card nem muda de fase sozinho
+    data_inicio = db.Column(db.Date, nullable=True)
     responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
     fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
     etapas_pre_definidas = db.Column(db.Text, nullable=True)  # JSON array de objetos ou CSV legado
-    prioridade = db.Column(db.Integer, default=0)  # 0: sem flag, 1: Importante, 2: Prioridade, 3: Urgente
+    # LEGADO: flag antiga (0: sem flag, 1: Importante, 2: Prioridade, 3: Urgente).
+    # Substituída pela prioridade numérica por funcionário (objeto_fase_funcionario.prioridade);
+    # mantida só para a migração inicial e para permitir rollback.
+    prioridade = db.Column(db.Integer, default=0)
     ordem_kanban = db.Column(db.Integer, default=0)
 
     # Relacionamentos
@@ -322,6 +336,40 @@ class Objeto(db.Model):
                 
         return best_idx
 
+    def alertas_inicio(self):
+        """Alertas sobre datas de início previstas (nunca movem o card).
+
+        - aguardando: o início previsto do módulo ainda não chegou
+        - proxima_atrasada: o início previsto da próxima etapa já passou, mas
+          a etapa atual ainda não foi concluída
+        """
+        hoje = date.today()
+        alertas = {"aguardando": None, "proxima_atrasada": None}
+
+        if self.data_inicio and self.data_inicio > hoje:
+            alertas["aguardando"] = {
+                "data": self.data_inicio.isoformat(),
+                "dias": (self.data_inicio - hoje).days,
+            }
+
+        etapas = parse_etapas(self.etapas_pre_definidas)
+        if etapas and self.has_proxima_etapa():
+            idx = self.calcular_indice_fase_atual() if self.fase_atual_id else -1
+            proxima = etapas[idx + 1] if idx + 1 < len(etapas) else None
+            if proxima and proxima.get("data_inicio"):
+                try:
+                    inicio = date.fromisoformat(proxima["data_inicio"])
+                except (ValueError, TypeError):
+                    inicio = None
+                if inicio and inicio < hoje:
+                    fase = db.session.get(Fase, proxima["fase_id"])
+                    alertas["proxima_atrasada"] = {
+                        "data": inicio.isoformat(),
+                        "dias": (hoje - inicio).days,
+                        "fase_nome": fase.nome_fase if fase else "",
+                    }
+        return alertas
+
     def has_proxima_etapa(self):
         etapas_list = parse_etapas(self.etapas_pre_definidas)
         if not etapas_list:
@@ -358,12 +406,13 @@ class Objeto(db.Model):
             "nome": self.nome,
             "descricao": self.descricao or "",
             "data_limite": self.data_limite.isoformat() if self.data_limite else "",
+            "data_inicio": self.data_inicio.isoformat() if self.data_inicio else None,
+            "alertas_inicio": self.alertas_inicio(),
             "responsavel_id": self.responsavel_id,
             "responsavel_nome": self.responsavel.nome if self.responsavel else "",
             "fase_atual_id": self.fase_atual_id,
             "fase_atual_nome": self.fase_atual.nome_fase if self.fase_atual else "",
             "fase_atual_cor": self.fase_atual.cor if self.fase_atual else "#94a3b8",
-            "prioridade": self.prioridade,
             "ordem_kanban": self.ordem_kanban,
             "sla": {
                 "flag": self.sla_flag(),
@@ -372,6 +421,9 @@ class Objeto(db.Model):
             },
             "sla_fase": sla_fase,
             "etapas_pre_definidas": parse_etapas(self.etapas_pre_definidas),
+            # Índice da etapa atual no roadmap (-1 = fase atual fora do roadmap).
+            # Etapas até este índice já foram cumpridas e não podem ser alteradas.
+            "indice_fase_atual": self.calcular_indice_fase_atual() if self.fase_atual_id else -1,
             "has_proxima_etapa": self.has_proxima_etapa(),
             "funcionarios_fase_atual": [
                 {"id": f.id_func, "nome": f.nome}
@@ -397,6 +449,10 @@ class Objeto(db.Model):
             ]
         else:
             d["aprovacao_funcionarios"] = []
+
+        # Posição deste card na fila de cada funcionário da fase ativa
+        from prioridades import prioridades_da_fase
+        d["prioridades_fase_atual"] = prioridades_da_fase(fase_ativa) if fase_ativa else []
 
         if include_historico:
             d["historico"] = [h.to_dict() for h in self.historico_fases.all()]

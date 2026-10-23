@@ -13,6 +13,11 @@ from models import (
 from auth import get_usuario_logado, requer_login, requer_perfil, requer_perfil_api, get_abas_usuario
 from notifications import notificar_atribuicao, notificar_mudanca_fase
 from sla_checker import verificar_sla_projetos
+from prioridades import (
+    renumerar_prioridades, definir_ordem, mover_para_posicao, fila_funcionario,
+    FilaDesatualizada,
+)
+from schema import ensure_schema
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +28,7 @@ bcrypt = Bcrypt(app)
 
 with app.app_context():
     db.create_all()
+    ensure_schema()
 
 # ─── SLA Scheduler ────────────────────────────────────────────────────────────
 
@@ -101,6 +107,12 @@ def kanban_page():
 @requer_perfil("admin", "gestor")
 def admin_page():
     return render_template("admin.html")
+
+
+@app.route("/prioridades")
+@requer_perfil("admin", "gestor")
+def prioridades_page():
+    return render_template("prioridades.html")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -481,12 +493,19 @@ def api_criar_projeto():
         # Se não enviou nome, usa nome padrão
         nome_obj = obj_data.get("nome", "").strip() or "Módulo 1"
 
-        etapas = obj_data.get("etapas_pre_definidas")
+        try:
+            etapas = normalizar_etapas(obj_data.get("etapas_pre_definidas"))
+            obj_data_inicio = datas_do_modulo(obj_data.get("data_inicio"), obj_data_limite)
+        except RoadmapInvalido as e:
+            db.session.rollback()
+            return jsonify({"erro": f"Módulo '{nome_obj}': {e}"}), 400
+        obj_data_inicio_str = obj_data_inicio.isoformat() if obj_data_inicio else None
         # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
         if isinstance(etapas, list) and fase_id:
             if not etapas or etapas[0].get("fase_id") != fase_id:
                 etapa_inicial = {
                     "fase_id": fase_id,
+                    "data_inicio": obj_data_inicio_str,
                     "data_limite": obj_data_limite_str or None,
                     "funcionario_id": obj_data.get("responsavel_id") or None,
                 }
@@ -494,6 +513,7 @@ def api_criar_projeto():
         elif fase_id and not etapas:
             etapas = [{
                 "fase_id": fase_id,
+                "data_inicio": obj_data_inicio_str,
                 "data_limite": obj_data_limite_str or None,
                 "funcionario_id": obj_data.get("responsavel_id") or None,
             }]
@@ -504,6 +524,7 @@ def api_criar_projeto():
             nome=nome_obj,
             descricao=obj_data.get("descricao", ""),
             data_limite=obj_data_limite,
+            data_inicio=obj_data_inicio,
             responsavel_id=obj_data.get("responsavel_id", novo_proj.responsavel_id),
             fase_atual_id=fase_id,
             etapas_pre_definidas=etapas_str
@@ -543,9 +564,116 @@ def api_editar_projeto(pid):
 @requer_perfil_api("admin")
 def api_deletar_projeto(pid):
     p = Projeto.query.get_or_404(pid)
+    afetados = _funcionarios_com_trabalho_atual([o.id for o in p.objetos])
     db.session.delete(p)
+    renumerar_prioridades(*afetados)
     db.session.commit()
     return jsonify({"ok": True})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Roadmap (etapas pré-definidas): validação
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RoadmapInvalido(ValueError):
+    pass
+
+
+def _data_iso_ou_none(valor, rotulo):
+    if not valor:
+        return None
+    try:
+        return date.fromisoformat(str(valor)).isoformat()
+    except ValueError:
+        raise RoadmapInvalido(f"{rotulo}: data inválida ({valor}).")
+
+
+def datas_do_modulo(data_inicio_str, data_limite):
+    """Converte e valida a data de início prevista do módulo (opcional, <= data limite)."""
+    data_inicio = date.fromisoformat(_data_iso_ou_none(data_inicio_str, "Início previsto")) if data_inicio_str else None
+    if data_inicio and data_limite and data_inicio > data_limite:
+        raise RoadmapInvalido("O início previsto do módulo não pode ser depois da data limite.")
+    return data_inicio
+
+
+def normalizar_etapas(etapas):
+    """Valida e padroniza a lista de etapas recebida da UI.
+
+    Cada etapa precisa de uma fase existente; o funcionário (opcional) precisa
+    existir e ter uma das funções exigidas pela fase.
+    """
+    if etapas is None:
+        return None
+    if not isinstance(etapas, list):
+        raise RoadmapInvalido("O roadmap deve ser uma lista de etapas.")
+
+    resultado = []
+    for i, etapa in enumerate(etapas, start=1):
+        if not isinstance(etapa, dict):
+            raise RoadmapInvalido(f"Etapa {i}: formato inválido.")
+        try:
+            fase_id = int(etapa.get("fase_id") or 0)
+        except (TypeError, ValueError):
+            fase_id = 0
+        fase = db.session.get(Fase, fase_id) if fase_id else None
+        if not fase:
+            raise RoadmapInvalido(f"Etapa {i}: selecione uma fase válida.")
+
+        func_id = etapa.get("funcionario_id") or None
+        if func_id:
+            try:
+                func = db.session.get(Funcionario, int(func_id))
+            except (TypeError, ValueError):
+                func = None
+            if not func:
+                raise RoadmapInvalido(f"Etapa {i}: funcionário não encontrado.")
+            if fase.funcoes_exigidas:
+                exigidas = {f.id_funcao for f in fase.funcoes_exigidas}
+                if not exigidas.intersection(f.id_funcao for f in func.funcoes):
+                    nomes = ", ".join(f.nome_funcao for f in fase.funcoes_exigidas)
+                    raise RoadmapInvalido(
+                        f"Etapa {i} ({fase.nome_fase}): {func.nome} não possui as funções exigidas ({nomes})."
+                    )
+            func_id = func.id_func
+
+        data_inicio = _data_iso_ou_none(etapa.get("data_inicio"), f"Etapa {i}")
+        data_limite = _data_iso_ou_none(etapa.get("data_limite"), f"Etapa {i}")
+        if data_inicio and data_limite and data_inicio > data_limite:
+            raise RoadmapInvalido(f"Etapa {i} ({fase.nome_fase}): o início previsto é depois do prazo previsto.")
+
+        resultado.append({
+            "fase_id": fase.id_fase,
+            "data_inicio": data_inicio,
+            "data_limite": data_limite,
+            "funcionario_id": func_id,
+        })
+    return resultado
+
+
+def validar_roadmap_editado(objeto, novas_etapas):
+    """Garante que a edição só altera etapas futuras.
+
+    As etapas já cumpridas e a etapa atual (até indice_fase_atual) precisam
+    continuar iguais e na mesma posição: o cálculo da próxima fase depende delas.
+    Etapas futuras novas não podem usar fases desativadas.
+    """
+    antigas = parse_etapas(objeto.etapas_pre_definidas)
+    idx = objeto.calcular_indice_fase_atual() if objeto.fase_atual_id and antigas else -1
+
+    if idx >= 0:
+        travadas = [e["fase_id"] for e in antigas[:idx + 1]]
+        if [e["fase_id"] for e in novas_etapas[:idx + 1]] != travadas:
+            raise RoadmapInvalido(
+                "As etapas já cumpridas e a etapa atual não podem ser alteradas, removidas ou reordenadas."
+            )
+        # Mantém os dados originais das etapas travadas
+        novas_etapas[:idx + 1] = antigas[:idx + 1]
+
+    for i, etapa in enumerate(novas_etapas[idx + 1:], start=idx + 2):
+        fase = db.session.get(Fase, etapa["fase_id"])
+        if fase.ativa == False:
+            raise RoadmapInvalido(f"Etapa {i}: a fase '{fase.nome_fase}' está desativada.")
+    return novas_etapas
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -568,18 +696,27 @@ def api_editar_objeto(oid):
         o.nome = body["nome"].strip()
     if "descricao" in body:
         o.descricao = body["descricao"].strip()
-    if "data_limite" in body:
-        o.data_limite = date.fromisoformat(body["data_limite"])
+    try:
+        if "data_limite" in body and body["data_limite"]:
+            o.data_limite = date.fromisoformat(body["data_limite"])
+        if "data_inicio" in body:
+            o.data_inicio = datas_do_modulo(body["data_inicio"], o.data_limite)
+        elif o.data_inicio and o.data_limite and o.data_inicio > o.data_limite:
+            raise RoadmapInvalido("O início previsto do módulo não pode ser depois da data limite.")
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e) if isinstance(e, RoadmapInvalido) else "Data limite inválida."}), 400
     if "responsavel_id" in body:
         o.responsavel_id = body["responsavel_id"]
     if "etapas_pre_definidas" in body:
-        etapas = body["etapas_pre_definidas"]
-        o.etapas_pre_definidas = serialize_etapas(etapas) if isinstance(etapas, list) else None
-        
-    u = get_usuario_logado()
-    if "prioridade" in body and u and u.perfil == "admin":
-        o.prioridade = int(body["prioridade"])
-        
+        try:
+            etapas = normalizar_etapas(body["etapas_pre_definidas"]) or []
+            etapas = validar_roadmap_editado(o, etapas)
+        except RoadmapInvalido as e:
+            db.session.rollback()
+            return jsonify({"erro": str(e)}), 400
+        o.etapas_pre_definidas = serialize_etapas(etapas)
+
     db.session.commit()
     return jsonify(o.to_dict())
 
@@ -598,16 +735,28 @@ def api_criar_objeto(pid):
         return jsonify({"erro": "Nome do módulo é obrigatório"}), 400
         
     fase_id = body.get("fase_id")
+    if fase_id:
+        fase_inicial = db.session.get(Fase, fase_id)
+        if not fase_inicial or fase_inicial.ativa == False:
+            return jsonify({"erro": "Fase inicial inválida ou desativada."}), 400
     data_limite_str = body.get("data_limite")
-    data_limite = date.fromisoformat(data_limite_str) if data_limite_str else p.data_limite
-    responsavel_id = body.get("responsavel_id", p.responsavel_id)
+    try:
+        data_limite = date.fromisoformat(data_limite_str) if data_limite_str else p.data_limite
+    except ValueError:
+        return jsonify({"erro": "Data limite do módulo inválida."}), 400
+    responsavel_id = body.get("responsavel_id") or p.responsavel_id
 
-    etapas = body.get("etapas_pre_definidas")
+    try:
+        etapas = normalizar_etapas(body.get("etapas_pre_definidas"))
+        data_inicio = datas_do_modulo(body.get("data_inicio"), data_limite)
+    except RoadmapInvalido as e:
+        return jsonify({"erro": str(e)}), 400
     # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
     if isinstance(etapas, list) and fase_id:
         if not etapas or etapas[0].get("fase_id") != fase_id:
             etapa_inicial = {
                 "fase_id": fase_id,
+                "data_inicio": data_inicio.isoformat() if data_inicio else None,
                 "data_limite": data_limite_str or None,
                 "funcionario_id": responsavel_id or None,
             }
@@ -615,6 +764,7 @@ def api_criar_objeto(pid):
     elif fase_id and not etapas:
         etapas = [{
             "fase_id": fase_id,
+            "data_inicio": data_inicio.isoformat() if data_inicio else None,
             "data_limite": data_limite_str or None,
             "funcionario_id": responsavel_id or None,
         }]
@@ -625,6 +775,7 @@ def api_criar_objeto(pid):
         nome=nome,
         descricao=body.get("descricao", ""),
         data_limite=data_limite,
+        data_inicio=data_inicio,
         responsavel_id=responsavel_id,
         fase_atual_id=fase_id,
         etapas_pre_definidas=etapas_str
@@ -633,8 +784,10 @@ def api_criar_objeto(pid):
     db.session.flush()
 
     if fase_id:
-        data_limite_fase_str = body.get("fase_data_limite")
-        data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
+        # Prazo da fase inicial: o informado, senão o da 1ª etapa, senão o do módulo
+        # (mesma regra da criação da OS)
+        data_limite_fase_str = body.get("fase_data_limite") or (etapas[0].get("data_limite") if etapas else None)
+        data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else data_limite
         of = ObjetoFase(
             objeto_id=novo_obj.id,
             id_fase=fase_id,
@@ -654,8 +807,14 @@ def api_deletar_objeto(oid):
     # Verifica se é o único objeto da OS. Se sim, não deve permitir (ou excluir a OS toda)
     if o.projeto.objetos.count() <= 1:
         return jsonify({"erro": "Não é possível excluir o único módulo de uma OS. Exclua a OS inteira."}), 400
-        
+
+    afetados = _funcionarios_com_trabalho_atual([o.id])
+    # Comentários do módulo continuam na OS (evita violar a FK comentarios.objeto_id)
+    Comentario.query.filter_by(objeto_id=oid).update(
+        {"objeto_id": None, "projeto_id": o.projeto_id}, synchronize_session=False
+    )
     db.session.delete(o)
+    renumerar_prioridades(*afetados)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -678,8 +837,10 @@ def api_mover_fase(oid):
     
     # Fechar fase atual
     fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+    equipe_anterior = []
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
+        equipe_anterior = [f.id_func for f in fase_ativa.funcionarios]
         
     data_limite_fase_str = body.get("data_limite_fase")
     data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
@@ -695,6 +856,8 @@ def api_mover_fase(oid):
     o.fase_atual_id = nova_fase_id
     if body.get("responsavel_fase_id"):
         o.responsavel_id = body["responsavel_fase_id"]
+    # A fase anterior deixou de ser trabalho atual da equipe dela
+    renumerar_prioridades(*equipe_anterior)
     db.session.commit()
     
     # Notificar equipe da nova fase
@@ -752,8 +915,10 @@ def _executar_mover_proxima_fase(o, etapas_list):
 
     # Fechar fase atual
     fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+    afetados = []
     if fase_ativa:
         fase_ativa.data_saida = datetime.utcnow()
+        afetados = [f.id_func for f in fase_ativa.funcionarios]
     
     # Determinar data_limite e responsável da nova fase
     data_limite_fase = None
@@ -783,7 +948,10 @@ def _executar_mover_proxima_fase(o, etapas_list):
         if func_pre:
             db.session.flush()
             of.funcionarios.append(func_pre)
-    
+            afetados.append(func_pre.id_func)
+
+    # Equipe anterior libera a posição; funcionário pré-definido entra no fim da fila
+    renumerar_prioridades(*afetados)
     db.session.commit()
     
     # Notificar equipe da nova fase
@@ -819,6 +987,8 @@ def api_atribuir_funcionario(of_id):
     if funcionario in of.funcionarios:
         return jsonify({"erro": "Funcionário já atribuído a esta fase"}), 409
     of.funcionarios.append(funcionario)
+    if of.data_saida is None:
+        renumerar_prioridades(funcionario.id_func)  # entra no fim da fila
     db.session.commit()
     # Notificar
     objeto = db.session.get(Objeto, of.objeto_id)
@@ -835,6 +1005,7 @@ def api_remover_funcionario_fase(of_id):
     funcionario = Funcionario.query.get_or_404(func_id)
     if funcionario in of.funcionarios:
         of.funcionarios.remove(funcionario)
+        renumerar_prioridades(funcionario.id_func)
         db.session.commit()
         
         # Após remoção, verificar se todos os restantes já aprovaram
@@ -891,6 +1062,8 @@ def _aprovar_fase_funcionario(fase_ativa, usuario, objeto):
             )
         ).values(aprovado_em=datetime.utcnow())
     )
+    # Trabalho aprovado deixa de ocupar posição na fila do funcionário
+    renumerar_prioridades(funcionario.id_func)
     db.session.commit()
     
     # Buscar o objeto se não fornecido
@@ -978,10 +1151,111 @@ def api_reatribuir_fase(oid):
                         "erro": f"O funcionário '{func.nome}' não possui as funções exigidas. Funções necessárias: {nomes_exigidas}"
                     }), 400
             novos_funcs.append(func)
+        afetados = {f.id_func for f in fase_ativa.funcionarios} | {f.id_func for f in novos_funcs}
         fase_ativa.funcionarios = novos_funcs
+        renumerar_prioridades(*afetados)
 
     db.session.commit()
     return jsonify(o.to_dict(include_historico=True))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  API: Prioridades (fila numérica por funcionário)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _funcionarios_com_trabalho_atual(objeto_ids):
+    """IDs dos funcionários na fase ativa dos objetos informados (antes de excluí-los)."""
+    if not objeto_ids:
+        return set()
+    rows = db.session.execute(
+        db.select(objeto_fase_funcionario.c.id_funcionario)
+        .join(ObjetoFase, ObjetoFase.id == objeto_fase_funcionario.c.id_objeto_fase)
+        .where(ObjetoFase.objeto_id.in_(objeto_ids), ObjetoFase.data_saida.is_(None))
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def _item_fila(of, prioridade):
+    o = of.objeto
+    dias_restantes = of.dias_restantes_sla()
+    return {
+        "objeto_fase_id": of.id,
+        "objeto_id": o.id,
+        "prioridade": prioridade,
+        "os": o.projeto.os if o.projeto else "",
+        "projeto_nome": o.projeto.nome if o.projeto else "",
+        "cliente": o.projeto.cliente if o.projeto else "",
+        "modulo": o.nome,
+        "fase_nome": of.fase.nome_fase if of.fase else "",
+        "fase_cor": of.fase.cor if of.fase else "#94a3b8",
+        "data_limite_fase": of.data_limite.isoformat() if of.data_limite else None,
+        "dias_restantes_fase": dias_restantes,
+        "data_limite_modulo": o.data_limite.isoformat() if o.data_limite else None,
+        "dias_restantes_modulo": o.dias_restantes_sla(),
+        "dias_na_fase": of.dias_na_fase(),
+    }
+
+
+def _fila_dict(func):
+    ids = fila_funcionario(func.id_func)
+    fases = {of.id: of for of in ObjetoFase.query.filter(ObjetoFase.id.in_(ids)).all()} if ids else {}
+    return {
+        "funcionario": {
+            "id": func.id_func,
+            "nome": func.nome,
+            "funcoes": [f.nome_funcao for f in func.funcoes],
+        },
+        "itens": [_item_fila(fases[of_id], pos) for pos, of_id in enumerate(ids, start=1)],
+    }
+
+
+@app.route("/api/prioridades", methods=["GET"])
+@requer_perfil_api("admin", "gestor")
+def api_listar_prioridades():
+    """Fila de trabalhos atuais de todos os funcionários."""
+    funcs = Funcionario.query.order_by(Funcionario.nome).all()
+    return jsonify([_fila_dict(f) for f in funcs])
+
+
+@app.route("/api/prioridades/<int:fid>", methods=["GET"])
+@requer_perfil_api("admin", "gestor")
+def api_prioridades_funcionario(fid):
+    return jsonify(_fila_dict(Funcionario.query.get_or_404(fid)))
+
+
+@app.route("/api/prioridades/<int:fid>", methods=["PUT"])
+@requer_perfil_api("admin")
+def api_definir_prioridades(fid):
+    """Reordena a fila inteira. Body: {"ordem": [objeto_fase_id, ...]} (1º = prioridade 1)."""
+    func = Funcionario.query.get_or_404(fid)
+    body = request.get_json() or {}
+    try:
+        definir_ordem(fid, body.get("ordem") or [])
+    except FilaDesatualizada as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e), "fila": _fila_dict(func)}), 409
+    db.session.commit()
+    return jsonify(_fila_dict(func))
+
+
+@app.route("/api/prioridades/<int:fid>/mover", methods=["POST"])
+@requer_perfil_api("admin")
+def api_mover_prioridade(fid):
+    """Move um trabalho para uma posição. Body: {"objeto_fase_id": int, "posicao": int}."""
+    func = Funcionario.query.get_or_404(fid)
+    body = request.get_json() or {}
+    try:
+        of_id = int(body.get("objeto_fase_id"))
+        posicao = int(body.get("posicao"))
+    except (TypeError, ValueError):
+        return jsonify({"erro": "objeto_fase_id e posicao são obrigatórios"}), 400
+    try:
+        mover_para_posicao(fid, of_id, posicao)
+    except FilaDesatualizada as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e), "fila": _fila_dict(func)}), 409
+    db.session.commit()
+    return jsonify(_fila_dict(func))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1027,59 +1301,85 @@ def calcular_relacao_funcionario(objeto, func_id):
     
     return list(relacoes) if relacoes else []
 
+
+def ids_objetos_relacionados(func_id):
+    """IDs dos objetos com que o funcionário tem relação: atribuído em qualquer fase
+    (atual ou passada) ou pré-definido em alguma etapa do roadmap."""
+    # Query 1: Cards onde o funcionário está atribuído em qualquer fase
+    assigned_ids = db.session.query(Objeto.id).join(ObjetoFase).join(
+        objeto_fase_funcionario,
+        objeto_fase_funcionario.c.id_objeto_fase == ObjetoFase.id,
+    ).filter(
+        objeto_fase_funcionario.c.id_funcionario == func_id
+    ).distinct().all()
+    assigned_ids = {r[0] for r in assigned_ids}
+
+    # Query 2: Cards onde o funcionário está no roadmap
+    roadmap_candidates = Objeto.query.filter(
+        Objeto.etapas_pre_definidas.isnot(None),
+        Objeto.etapas_pre_definidas != ''
+    ).all()
+    roadmap_ids = set()
+    for o in roadmap_candidates:
+        etapas = parse_etapas(o.etapas_pre_definidas)
+        for e in etapas:
+            if e.get("funcionario_id") == func_id:
+                roadmap_ids.add(o.id)
+                break
+
+    return assigned_ids | roadmap_ids
+
+
 @app.route("/api/kanban", methods=["GET"])
 @requer_perfil_api("admin", "gestor", "funcionario")
 def api_kanban():
-    """Retorna dados do board Kanban: fases como colunas + objetos."""
+    """Retorna dados do board Kanban: fases como colunas + objetos.
+
+    - Funcionário: vê apenas os cards com que tem relação.
+    - Admin/Gestor: vê todos os cards. Com ?funcionario_id=X, vê apenas os cards
+      relacionados ao funcionário X (atuais, concluídos e futuros), com a relação
+      calculada para X.
+    """
     u = get_usuario_logado()
     fases = Fase.query.filter(db.or_(Fase.ativa == True, Fase.ativa == None)).order_by(Fase.ordem).all()
-    
-    # Determinar func_id para cálculo de relação
+
+    # Funcionário cujos cards devem ser filtrados (None = sem filtro)
+    filtro_func_id = None
+    # Funcionário usado para calcular a relação de cada card
     relacao_func_id = None
-    if u.perfil == "funcionario" and u.funcionario:
-        relacao_func_id = u.funcionario.id_func
+    if u.perfil == "funcionario":
+        if not u.funcionario:
+            # Usuário sem funcionário vinculado não tem cards
+            filtro_func_id = -1
+        else:
+            filtro_func_id = relacao_func_id = u.funcionario.id_func
     else:
-        # Admin/Gestor pode solicitar relação de um funcionário específico
-        rfid = request.args.get("relacao_func_id")
-        if rfid:
+        fid = request.args.get("funcionario_id")
+        if fid:
             try:
-                relacao_func_id = int(rfid)
+                fid = int(fid)
             except (ValueError, TypeError):
-                pass
-    
+                return jsonify({"erro": "funcionario_id inválido"}), 400
+            if not db.session.get(Funcionario, fid):
+                return jsonify({"erro": "Funcionário não encontrado"}), 404
+            filtro_func_id = relacao_func_id = fid
+        else:
+            # Compatibilidade: relação sem filtrar os cards
+            rfid = request.args.get("relacao_func_id")
+            if rfid:
+                try:
+                    relacao_func_id = int(rfid)
+                except (ValueError, TypeError):
+                    pass
+
     objetos_query = Objeto.query
-    if u.perfil == "funcionario" and u.funcionario:
-        func_id = u.funcionario.id_func
-        
-        # Query 1: Cards onde o funcionário está atribuído em qualquer fase
-        assigned_ids = db.session.query(Objeto.id).join(ObjetoFase).join(
-            objeto_fase_funcionario,
-            objeto_fase_funcionario.c.id_objeto_fase == ObjetoFase.id,
-        ).filter(
-            objeto_fase_funcionario.c.id_funcionario == func_id
-        ).distinct().all()
-        assigned_ids = {r[0] for r in assigned_ids}
-        
-        # Query 2: Cards onde o funcionário está no roadmap futuro
-        roadmap_candidates = Objeto.query.filter(
-            Objeto.etapas_pre_definidas.isnot(None),
-            Objeto.etapas_pre_definidas != ''
-        ).all()
-        roadmap_ids = set()
-        for o in roadmap_candidates:
-            etapas = parse_etapas(o.etapas_pre_definidas)
-            for e in etapas:
-                if e.get("funcionario_id") == func_id:
-                    roadmap_ids.add(o.id)
-                    break
-        
-        # Combinar
-        all_ids = assigned_ids | roadmap_ids
+    if filtro_func_id is not None:
+        all_ids = ids_objetos_relacionados(filtro_func_id) if filtro_func_id > 0 else set()
         if all_ids:
             objetos_query = Objeto.query.filter(Objeto.id.in_(all_ids))
         else:
             objetos_query = Objeto.query.filter(db.literal(False))
-    
+
     objetos = objetos_query.all()
     
     # Montar board
@@ -1099,6 +1399,9 @@ def api_kanban():
         # Adicionar relação do funcionário se solicitado
         if relacao_func_id:
             obj_dict["relacao_funcionario"] = calcular_relacao_funcionario(o, relacao_func_id)
+            # Etapa pré-definida já passada e executada por outra pessoa: sem relação real
+            if filtro_func_id and not obj_dict["relacao_funcionario"]:
+                continue
         else:
             obj_dict["relacao_funcionario"] = None
         
@@ -1272,10 +1575,17 @@ def api_historico_atividade(os_code):
                             data_esperada = dt.strftime("%d/%m/%Y")
                         except (ValueError, TypeError):
                             pass
+                    inicio_esperado = None
+                    if etapa.get("data_inicio"):
+                        try:
+                            inicio_esperado = date.fromisoformat(etapa["data_inicio"]).strftime("%d/%m/%Y")
+                        except (ValueError, TypeError):
+                            pass
                     
                     eventos.append({
                         "tipo": "fase_futura",
                         "data_str": data_esperada,
+                        "inicio_str": inicio_esperado,
                         "fase_nome": f.nome_fase,
                         "fase_cor": f.cor,
                         "responsavel": func_nome,
