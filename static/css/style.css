@@ -1211,6 +1211,7 @@ input[type="color"] {
 .kanban-toolbar .input-select:disabled {
     opacity: 0.55;
     cursor: not-allowed;
+}
 
 /* ─── Prioridade numérica ────────────────────────────────────────────── */
 
@@ -1468,6 +1469,38 @@ input[type="color"] {
 }
 
 .prio-seta {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    width: 24px;
+    height: 22px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.prio-seta:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border); }
+.prio-seta:focus-visible { outline: 2px solid var(--accent); }
+.prio-seta:disabled { opacity: 0.25; cursor: default; }
+
+.prio-coluna-rodape {
+    display: none;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    background: var(--warning-bg);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.prio-coluna.alterada .prio-coluna-rodape { display: flex; }
+.prio-coluna-rodape .btn { flex: 1; justify-content: center; }
+
+@media (max-width: 768px) {
+    .prio-board { flex-direction: column; align-items: stretch; }
+    .prio-coluna { flex-basis: auto; max-height: none; }
+    .prio-toolbar-acoes .input-search { width: 100%; }
+}
 
 /* ─── Editor de roadmap e módulos da OS ──────────────────────────────── */
 
@@ -1658,34 +1691,6 @@ input[type="color"] {
     border: 1px solid transparent;
     color: var(--text-muted);
     border-radius: var(--radius-sm);
-    width: 24px;
-    height: 22px;
-    cursor: pointer;
-    font-size: 11px;
-    line-height: 1;
-}
-
-.prio-seta:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border); }
-.prio-seta:focus-visible { outline: 2px solid var(--accent); }
-.prio-seta:disabled { opacity: 0.25; cursor: default; }
-
-.prio-coluna-rodape {
-    display: none;
-    gap: 8px;
-    padding: 10px;
-    border-top: 1px solid var(--border);
-    background: var(--warning-bg);
-    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-}
-
-.prio-coluna.alterada .prio-coluna-rodape { display: flex; }
-.prio-coluna-rodape .btn { flex: 1; justify-content: center; }
-
-@media (max-width: 768px) {
-    .prio-board { flex-direction: column; align-items: stretch; }
-    .prio-coluna { flex-basis: auto; max-height: none; }
-    .prio-toolbar-acoes .input-search { width: 100%; }
-
     width: 28px;
     height: 28px;
     cursor: pointer;
