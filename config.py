@@ -18,6 +18,14 @@ class Config:
         "sqlite:///gerenciamento.db"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # O MySQL do PythonAnywhere encerra conexões paradas há ~5 min. Sem isto, a
+    # primeira consulta depois de um tempo sem uso falha ("MySQL server has gone
+    # away") e a página dá erro 500. pool_recycle renova a conexão antes disso e
+    # pool_pre_ping descarta conexões mortas antes de usá-las.
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_recycle": 280,
+        "pool_pre_ping": True,
+    }
 
     # ─── E-mail (SMTP) ───────────────────────────────────────────────────────
     EMAIL_ATIVO = os.environ.get("EMAIL_ATIVO", "false").lower() == "true"
