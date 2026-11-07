@@ -154,6 +154,19 @@ def api_me():
 #  API: USUÁRIOS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def vincular_usuarios_funcionarios():
+    """Liga cada usuário (login) ao funcionário com o mesmo e-mail, se ainda não
+    estiverem ligados. Sem esse vínculo o usuário não vê seus cards nem aprova fases."""
+    vinculados = 0
+    for f in Funcionario.query.filter(Funcionario.usuario_id.is_(None)).all():
+        u = Usuario.query.filter(db.func.lower(Usuario.email) == f.email.lower()).first()
+        if u and not u.funcionario:
+            f.usuario_id = u.id
+            db.session.flush()
+            vinculados += 1
+    return vinculados
+
+
 @app.route("/api/usuarios", methods=["GET"])
 @requer_perfil_api("admin")
 def api_listar_usuarios():
@@ -181,6 +194,8 @@ def api_criar_usuario():
         trocar_senha=True,
     )
     db.session.add(novo)
+    db.session.flush()
+    vincular_usuarios_funcionarios()  # funcionário com o mesmo e-mail, se existir
     db.session.commit()
     return jsonify(novo.to_dict()), 201
 
@@ -255,6 +270,8 @@ def api_criar_funcionario():
     if usuario_id:
         novo.usuario_id = usuario_id
     db.session.add(novo)
+    db.session.flush()
+    vincular_usuarios_funcionarios()  # usuário (login) com o mesmo e-mail, se existir
     db.session.commit()
     return jsonify(novo.to_dict()), 201
 
@@ -273,6 +290,8 @@ def api_editar_funcionario(fid):
         f.funcoes = funcoes
     if "usuario_id" in body:
         f.usuario_id = body["usuario_id"]
+    db.session.flush()
+    vincular_usuarios_funcionarios()
     db.session.commit()
     return jsonify(f.to_dict())
 
@@ -1648,6 +1667,8 @@ def seed_dados_reais():
 with app.app_context():
     seed_dados_reais()
     seed_admin()
+    if vincular_usuarios_funcionarios():
+        db.session.commit()
     # Fecha as conexões abertas na inicialização. O uWSGI (PythonAnywhere) cria os
     # workers copiando este processo; uma conexão MySQL herdada por vários workers
     # corrompe o canal SSL ("MySQL server has gone away / SSLEOFError").

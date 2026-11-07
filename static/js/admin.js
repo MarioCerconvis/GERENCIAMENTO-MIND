@@ -64,6 +64,9 @@ async function loadFuncionarios() {
             <td>${f.nome}</td>
             <td>${f.email}</td>
             <td>${funcoes || "—"}</td>
+            <td>${f.tem_login
+                ? `<span class="tag" style="white-space:nowrap;" title="Login ligado a este funcionário">✅ ${f.perfil}</span>`
+                : `<span class="tag" style="opacity:0.7;white-space:nowrap;" title="Crie um usuário com o mesmo e-mail na aba Usuários">Sem login</span>`}</td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="editFuncionario(${f.id})">Editar</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteFuncionario(${f.id})">Excluir</button>

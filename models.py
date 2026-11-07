@@ -92,6 +92,8 @@ class Funcionario(db.Model):
             "nome": self.nome,
             "email": self.email,
             "usuario_id": self.usuario_id,
+            "tem_login": self.usuario is not None,
+            "perfil": self.usuario.perfil if self.usuario else None,
         }
         if include_funcoes:
             d["funcoes"] = [f.to_dict() for f in self.funcoes]
