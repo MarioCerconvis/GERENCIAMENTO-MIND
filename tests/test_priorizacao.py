@@ -187,7 +187,7 @@ class PriorizacaoTest(unittest.TestCase):
         self.assertEqual(self.admin.delete(f"/api/objetos/{a}").status_code, 200)
         self.assertEqual(self.fila(f), [b])
 
-        self.assertEqual(self.admin.delete(f"/api/projetos/{projeto['id']}").status_code, 200)
+        self.assertEqual(self.admin.delete(f"/api/projetos/{projeto['id']}", json={"os": projeto["os"]}).status_code, 200)
         self.assertEqual(self.fila(f), [])
 
     def test_permissoes(self):

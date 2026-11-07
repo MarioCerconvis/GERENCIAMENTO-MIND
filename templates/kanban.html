@@ -306,7 +306,29 @@
             </div>
         </div>
         <div class="modal-footer">
+            <button class="btn btn-danger btn-sm" id="rm-excluir-os" style="margin-right:auto;display:none;" onclick="abrirExcluirOS(rm.projeto.id)">Excluir OS</button>
             <button class="btn btn-ghost" onclick="fecharModal('modal-roadmap')">Fechar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Excluir OS (confirmação digitando o código) -->
+<div class="modal-overlay" id="modal-excluir-os" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h2>Excluir OS</h2>
+            <button class="modal-close" onclick="fecharModal('modal-excluir-os')" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="excluir-os-alerta" id="excluir-os-resumo"></div>
+            <div class="form-group">
+                <label for="excluir-os-confirmacao" id="excluir-os-label">Digite o código da OS para confirmar</label>
+                <input type="text" id="excluir-os-confirmacao" autocomplete="off">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="fecharModal('modal-excluir-os')">Cancelar</button>
+            <button class="btn btn-danger" id="btn-confirmar-excluir-os" disabled>Excluir OS definitivamente</button>
         </div>
     </div>
 </div>

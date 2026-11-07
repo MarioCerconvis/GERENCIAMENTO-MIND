@@ -553,12 +553,26 @@ def api_editar_projeto(pid):
 @app.route("/api/projetos/<int:pid>", methods=["DELETE"])
 @requer_perfil_api("admin")
 def api_deletar_projeto(pid):
+    """Exclui a OS com todos os módulos, histórico de fases e comentários.
+
+    Body: {"os": "<código da OS>"} — confirmação obrigatória, porque não há volta.
+    """
     p = Projeto.query.get_or_404(pid)
-    afetados = _funcionarios_com_trabalho_atual([o.id for o in p.objetos])
+    body = request.get_json(silent=True) or {}
+    if (body.get("os") or "").strip() != p.os:
+        return jsonify({"erro": "Confirme digitando o código exato da OS."}), 400
+
+    objeto_ids = [o.id for o in p.objetos]
+    afetados = _funcionarios_com_trabalho_atual(objeto_ids)
+    # Comentários apontam para a OS e os módulos (FK): saem antes, senão o MySQL recusa
+    Comentario.query.filter(db.or_(
+        Comentario.projeto_id == pid,
+        Comentario.objeto_id.in_(objeto_ids) if objeto_ids else db.false(),
+    )).delete(synchronize_session=False)
     db.session.delete(p)
     renumerar_prioridades(*afetados)
     db.session.commit()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "modulos_excluidos": len(objeto_ids)})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

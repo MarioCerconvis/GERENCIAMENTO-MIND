@@ -1285,8 +1285,10 @@ async function openDetail(objetoId) {
     if (["admin", "gestor"].includes(currentUser?.perfil)) {
         html += `
             <div style="display:flex;gap:10px;margin-top:24px;">
-                <button class="btn btn-ghost" onclick="openEditProject(${p.projeto_id})">Editar</button>
-                ${currentUser.perfil === "admin" ? `<button class="btn btn-danger btn-sm" onclick="deleteObject(${p.id})">Excluir</button>` : ""}
+                <button class="btn btn-ghost" onclick="openEditProject(${p.projeto_id})">Editar OS</button>
+                ${currentUser.perfil === "admin" ? `
+                    <button class="btn btn-danger btn-sm" style="margin-left:auto;" onclick="deleteObject(${p.id})">Excluir módulo</button>
+                    <button class="btn btn-danger btn-sm" onclick="abrirExcluirOS(${p.projeto_id})">Excluir OS</button>` : ""}
             </div>
         `;
     }
@@ -1395,15 +1397,84 @@ async function openEditProject(osId) {
 }
 
 async function deleteObject(id) {
-    if (!confirm("Tem certeza que deseja excluir este módulo?")) return;
+    const objeto = await fetch(`/api/objetos/${id}`).then(r => r.ok ? r.json() : null);
+    const projeto = objeto ? await fetch(`/api/projetos/${objeto.projeto_id}`).then(r => r.ok ? r.json() : null) : null;
+    if (!objeto || !projeto) { showToast("Erro ao carregar o módulo", "error"); return; }
+
+    // Uma OS precisa de ao menos um módulo: o último só sai excluindo a OS
+    if ((projeto.objetos || []).length <= 1) {
+        if (confirm(`"${objeto.nome}" é o único módulo da OS ${projeto.os}. Para removê-lo, é preciso excluir a OS inteira.\n\nAbrir a exclusão da OS?`)) {
+            abrirExcluirOS(projeto.id);
+        }
+        return;
+    }
+    if (!confirm(`Excluir o módulo "${objeto.nome}" da OS ${projeto.os}?\n\nO histórico de fases dele será apagado. Os comentários continuam na OS. Esta ação não pode ser desfeita.`)) return;
+
     const res = await fetch(`/api/objetos/${id}`, { method: "DELETE" });
     if (res.ok) {
-        fecharModal("modal-detalhe");
-        showToast("Módulo excluído!", "success");
+        fecharModal("modal-detalhe", true);
+        showToast(`Módulo "${objeto.nome}" excluído!`, "success");
         await loadBoard();
     } else {
         const err = await res.json();
         showToast(err.erro || "Erro ao excluir", "error");
+    }
+}
+
+// ─── Excluir OS ──────────────────────────────────────────────────────────────
+
+let osParaExcluir = null;
+
+async function abrirExcluirOS(projetoId) {
+    const res = await fetch(`/api/projetos/${projetoId}`);
+    if (!res.ok) { showToast("Erro ao carregar a OS", "error"); return; }
+    const p = await res.json();
+    osParaExcluir = p;
+    const nModulos = (p.objetos || []).length;
+    const nComentarios = (p.comentarios || []).length;
+
+    document.getElementById("excluir-os-resumo").innerHTML = `
+        <strong>OS ${escHtml(p.os)}${p.nome ? ` — ${escHtml(p.nome)}` : ""}</strong>
+        <p>Serão apagados definitivamente:</p>
+        <ul>
+            <li>${nModulos} módulo(s): ${(p.objetos || []).map(o => escHtml(o.nome)).join(", ")}</li>
+            <li>todo o histórico de fases</li>
+            <li>${nComentarios} comentário(s)</li>
+        </ul>
+        <p><strong>Esta ação não pode ser desfeita.</strong></p>
+    `;
+    document.getElementById("excluir-os-label").textContent = `Digite ${p.os} para confirmar`;
+    const input = document.getElementById("excluir-os-confirmacao");
+    const btn = document.getElementById("btn-confirmar-excluir-os");
+    input.value = "";
+    btn.disabled = true;
+    input.oninput = () => { btn.disabled = input.value.trim() !== p.os; };
+    btn.onclick = confirmarExcluirOS;
+    abrirModal("modal-excluir-os");
+    input.focus();
+}
+
+async function confirmarExcluirOS() {
+    const p = osParaExcluir;
+    const confirmacao = document.getElementById("excluir-os-confirmacao").value.trim();
+    if (!p || confirmacao !== p.os) return;
+    const btn = document.getElementById("btn-confirmar-excluir-os");
+    btn.disabled = true;
+    const res = await fetch(`/api/projetos/${p.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ os: confirmacao }),
+    });
+    if (res.ok) {
+        ["modal-excluir-os", "modal-roadmap", "modal-detalhe"].forEach(id => fecharModal(id, true));
+        rm.dirty = false;
+        showToast(`OS ${p.os} excluída.`, "success");
+        osParaExcluir = null;
+        await loadBoard();
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao excluir a OS", "error");
+        btn.disabled = false;
     }
 }
 // ─── Assign Employee ─────────────────────────────────────────────────────────
@@ -1550,6 +1621,7 @@ async function abrirEditorRoadmap(objetoId) {
     rm.objetoOrigem = objetoId;
     rm.dirty = false;
     if (!(await carregarProjetoRoadmap(objeto.projeto_id))) return;
+    document.getElementById("rm-excluir-os").style.display = currentUser?.perfil === "admin" ? "" : "none";
     abrirModal("modal-roadmap");
     await selecionarModuloRoadmap(objetoId, true);
 }
@@ -1775,7 +1847,7 @@ cabecalho = `
                 </div>
                 ${isAdmin ? `
                     <button type="button" class="btn btn-danger btn-sm" onclick="removerModuloRoadmap(${mod?.id})"
-                            ${unico ? "disabled title='Uma OS precisa de ao menos um módulo. Para remover, exclua a OS.'" : ""}>
+                            ${unico ? "title='Único módulo: para removê-lo é preciso excluir a OS'" : ""}>
                         Remover módulo
                     </button>` : ""}
             </div>
@@ -1951,6 +2023,12 @@ async function criarModuloRoadmap() {
 async function removerModuloRoadmap(objetoId) {
     const mod = (rm.projeto?.objetos || []).find(o => o.id === objetoId);
     if (!mod) return;
+    if ((rm.projeto?.objetos || []).length <= 1) {
+        if (confirm(`"${mod.nome}" é o único módulo da OS ${rm.projeto.os}. Para removê-lo, é preciso excluir a OS inteira.\n\nAbrir a exclusão da OS?`)) {
+            abrirExcluirOS(rm.projeto.id);
+        }
+        return;
+    }
     if (!confirm(`Remover o módulo "${mod.nome}" da OS ${rm.projeto.os}?\n\nO histórico de fases dele será apagado. Os comentários continuam na OS.`)) return;
 
     const res = await fetch(`/api/objetos/${objetoId}`, { method: "DELETE" });
