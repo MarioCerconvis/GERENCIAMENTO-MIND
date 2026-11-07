@@ -89,6 +89,9 @@ tentado de novo (até 5 vezes).
 
 **Tarefas agendadas (planos pagos do PythonAnywhere):** threads não rodam em web apps
 lá, então o agendador interno de SLA não dispara. Configure na aba *Tasks*:
-- diária: `cd ~/GERENCIAMENTO-MIND && venv/bin/flask --app app verificar-sla`
-- de hora em hora: `cd ~/GERENCIAMENTO-MIND && venv/bin/flask --app app processar-emails`
+- diária: `cd ~/GERENCIAMENTO-MIND && ~/.virtualenvs/mind/bin/flask --app app verificar-sla`
+- de hora em hora: `cd ~/GERENCIAMENTO-MIND && ~/.virtualenvs/mind/bin/flask --app app processar-emails`
   (reenvia o que falhou)
+
+**Testar a configuração** (no Bash do servidor):
+`cd ~/GERENCIAMENTO-MIND && ~/.virtualenvs/mind/bin/flask --app app testar-email seu@email.com`
