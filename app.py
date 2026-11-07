@@ -1648,6 +1648,11 @@ def seed_dados_reais():
 with app.app_context():
     seed_dados_reais()
     seed_admin()
+    # Fecha as conexões abertas na inicialização. O uWSGI (PythonAnywhere) cria os
+    # workers copiando este processo; uma conexão MySQL herdada por vários workers
+    # corrompe o canal SSL ("MySQL server has gone away / SSLEOFError").
+    db.session.remove()
+    db.engine.dispose()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
