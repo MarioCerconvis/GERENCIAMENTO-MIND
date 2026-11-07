@@ -45,6 +45,9 @@ class Config:
     BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
     # Endereço público do sistema, usado no botão "Abrir" dos e-mails
     APP_URL = os.environ.get("APP_URL", "")
+    # Modo de teste: se preenchido, TODOS os e-mails vão para este endereço (o
+    # destinatário original aparece no assunto). Deixe vazio em produção.
+    EMAIL_REDIRECIONAR_PARA = os.environ.get("EMAIL_REDIRECIONAR_PARA", "").strip()
     SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.exemplo.com.br")
     SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
     SMTP_USER = os.environ.get("SMTP_USER", "sistema@exemplo.com.br")

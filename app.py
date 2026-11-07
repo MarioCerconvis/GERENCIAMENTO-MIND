@@ -1905,6 +1905,8 @@ def testar_email_command(destino):
     cfg = app.config
     print(f"EMAIL_ATIVO={cfg.get('EMAIL_ATIVO')} | provedor={cfg.get('EMAIL_PROVEDOR')} | "
           f"remetente={cfg.get('EMAIL_REMETENTE')}")
+    if cfg.get("EMAIL_REDIRECIONAR_PARA"):
+        print(f"MODO DE TESTE: todos os e-mails vão para {cfg['EMAIL_REDIRECIONAR_PARA']}")
     if cfg.get("EMAIL_PROVEDOR") == "smtp":
         print(f"SMTP {cfg.get('SMTP_HOST')}:{cfg.get('SMTP_PORT')} usuário={cfg.get('SMTP_USER')} "
               f"senha={'definida' if cfg.get('SMTP_PASS') else 'VAZIA'}")

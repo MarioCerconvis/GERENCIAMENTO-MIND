@@ -44,6 +44,7 @@ def _get_config():
         "brevo_api_key": current_app.config.get("BREVO_API_KEY", ""),
         "remetente": current_app.config.get("EMAIL_REMETENTE", ""),
         "app_url": current_app.config.get("APP_URL", "").rstrip("/"),
+        "redirecionar_para": current_app.config.get("EMAIL_REDIRECIONAR_PARA", ""),
     }
 
 
@@ -139,10 +140,15 @@ def _transportar(cfg, email):
         print(f"\n{'='*60}\n[SIMULACAO DE E-MAIL]\nPara: {email.destinatario}\n"
               f"Assunto: {email.assunto}\n{_html_para_texto(email.corpo_html)}\n{'='*60}\n")
         return
+    destinatario, assunto = email.destinatario, email.assunto
+    if cfg["redirecionar_para"]:
+        # Modo de teste: tudo vai para um endereço só, sem incomodar os funcionários
+        assunto = f"[TESTE → {destinatario}] {assunto}"
+        destinatario = cfg["redirecionar_para"]
     if cfg["provedor"] == "brevo":
-        _enviar_brevo(cfg, email.destinatario, email.assunto, email.corpo_html)
+        _enviar_brevo(cfg, destinatario, assunto, email.corpo_html)
     else:
-        _enviar_smtp(cfg, email.destinatario, email.assunto, email.corpo_html)
+        _enviar_smtp(cfg, destinatario, assunto, email.corpo_html)
 
 
 def enviar_teste(destinatario):

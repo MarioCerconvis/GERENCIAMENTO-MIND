@@ -86,6 +86,8 @@ tentado de novo (até 5 vezes).
 - `EMAIL_REMETENTE=Gerenciamento MIND <sistema@seudominio.com.br>` — no Brevo, o
   remetente precisa estar verificado.
 - `APP_URL=https://seu-usuario.pythonanywhere.com` — link "Abrir" nos e-mails.
+- `EMAIL_REDIRECIONAR_PARA=seu@email.com` — **modo de teste**: todos os e-mails vão
+  para esse endereço, com o destinatário original no assunto. Deixe vazio em produção.
 
 **Tarefas agendadas (planos pagos do PythonAnywhere):** threads não rodam em web apps
 lá, então o agendador interno de SLA não dispara. Configure na aba *Tasks*:

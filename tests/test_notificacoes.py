@@ -162,6 +162,20 @@ class NotificacoesTest(unittest.TestCase):
             finally:
                 app.config.update(EMAIL_ATIVO=False, EMAIL_PROVEDOR="smtp")
 
+    def test_modo_de_teste_redireciona_todos_os_emails(self):
+        with app.app_context():
+            db.session.add(EmailPendente(destinatario="funcionario@mind.com.br", assunto="[MIND] Algo", corpo_html="<p>x</p>"))
+            db.session.commit()
+            app.config.update(EMAIL_ATIVO=True, EMAIL_REDIRECIONAR_PARA="eu@teste.com")
+            try:
+                with mock.patch.object(notifications, "_enviar_smtp") as envio:
+                    notifications.processar_fila()
+                _, destinatario, assunto, _ = envio.call_args[0]
+                self.assertEqual(destinatario, "eu@teste.com")
+                self.assertEqual(assunto, "[TESTE → funcionario@mind.com.br] [MIND] Algo")
+            finally:
+                app.config.update(EMAIL_ATIVO=False, EMAIL_REDIRECIONAR_PARA="")
+
     def test_comando_processar_emails(self):
         with app.app_context():
             db.session.add(EmailPendente(destinatario="z@teste.com", assunto="A", corpo_html="<p>oi</p>"))
