@@ -18,6 +18,15 @@ class Config:
         "sqlite:///gerenciamento.db"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # ─── Acesso ──────────────────────────────────────────────────────────────
+    # Usuários cujo funcionário tem uma destas funções têm acesso de admin,
+    # independentemente do perfil cadastrado (separadas por vírgula).
+    FUNCOES_ADMIN = [
+        f.strip().lower()
+        for f in os.environ.get("FUNCOES_ADMIN", "Diretor,Gerente").split(",")
+        if f.strip()
+    ]
     # O MySQL do PythonAnywhere encerra conexões paradas há ~5 min. Sem isto, a
     # primeira consulta depois de um tempo sem uso falha ("MySQL server has gone
     # away") e a página dá erro 500. pool_recycle renova a conexão antes disso e

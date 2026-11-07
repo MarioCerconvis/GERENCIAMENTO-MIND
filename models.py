@@ -58,12 +58,29 @@ class Usuario(db.Model):
     # Relacionamento com funcionario (1:1 opcional)
     funcionario = db.relationship("Funcionario", backref="usuario", uselist=False)
 
+    @property
+    def admin_por_funcao(self):
+        """True se o funcionário ligado a este usuário tem uma função com acesso de
+        admin (Config.FUNCOES_ADMIN, por padrão Diretor e Gerente)."""
+        if not self.funcionario:
+            return False
+        from flask import current_app, has_app_context
+        funcoes_admin = current_app.config.get("FUNCOES_ADMIN", []) if has_app_context() else []
+        return any(f.nome_funcao.strip().lower() in funcoes_admin for f in self.funcionario.funcoes)
+
+    @property
+    def perfil_efetivo(self):
+        """Perfil usado nas permissões: o cadastrado, promovido a admin pela função."""
+        return "admin" if self.admin_por_funcao else self.perfil
+
     def to_dict(self):
         return {
             "id": self.id,
             "nome": self.nome,
             "email": self.email,
-            "perfil": self.perfil,
+            "perfil": self.perfil_efetivo,
+            "perfil_cadastrado": self.perfil,
+            "admin_por_funcao": self.admin_por_funcao,
             "ativo": self.ativo,
             "criado_em": self.criado_em.isoformat() if self.criado_em else "",
             "trocar_senha": self.trocar_senha,
@@ -93,7 +110,7 @@ class Funcionario(db.Model):
             "email": self.email,
             "usuario_id": self.usuario_id,
             "tem_login": self.usuario is not None,
-            "perfil": self.usuario.perfil if self.usuario else None,
+            "perfil": self.usuario.perfil_efetivo if self.usuario else None,
         }
         if include_funcoes:
             d["funcoes"] = [f.to_dict() for f in self.funcoes]

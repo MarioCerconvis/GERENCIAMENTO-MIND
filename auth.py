@@ -35,7 +35,7 @@ def requer_perfil(*perfis):
         @wraps(f)
         def wrapped(*args, **kwargs):
             u = get_usuario_logado()
-            if not u or u.perfil not in perfis:
+            if not u or u.perfil_efetivo not in perfis:
                 return redirect(url_for("login"))
             return f(*args, **kwargs)
         return wrapped
@@ -50,7 +50,7 @@ def requer_perfil_api(*perfis):
             u = get_usuario_logado()
             if not u:
                 return jsonify({"erro": "Não autenticado"}), 401
-            if u.perfil not in perfis:
+            if u.perfil_efetivo not in perfis:
                 return jsonify({"erro": "Sem permissão"}), 403
             return f(*args, **kwargs)
         return wrapped
@@ -75,7 +75,7 @@ PERMISSOES = {
 
 def usuario_pode(usuario, recurso):
     """Verifica se o usuário tem acesso a um recurso."""
-    return recurso in PERMISSOES.get(usuario.perfil, set())
+    return recurso in PERMISSOES.get(usuario.perfil_efetivo, set())
 
 
 def get_abas_usuario(usuario):
@@ -85,4 +85,4 @@ def get_abas_usuario(usuario):
         "gestor": ["kanban", "projetos", "funcionarios", "funcoes", "fases"],
         "funcionario": ["kanban"],
     }
-    return mapa.get(usuario.perfil, [])
+    return mapa.get(usuario.perfil_efetivo, [])

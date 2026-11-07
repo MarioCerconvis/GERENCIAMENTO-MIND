@@ -57,7 +57,13 @@ def cliente_logado(email):
 
 
 ADMIN = "eduardo@mind.com.br"
-GESTOR = "john@mind.com.br"
+# Gestor "puro": o John do seed é Gerente e por isso tem acesso de admin
+GESTOR = "gestor.teste@teste.com"
+
+with app.app_context():
+    if not Usuario.query.filter_by(email=GESTOR).first():
+        db.session.add(Usuario(nome="Gestor Teste", email=GESTOR, perfil="gestor", hash_senha="x"))
+        db.session.commit()
 
 
 def criar_projeto(client, objetos, **campos):

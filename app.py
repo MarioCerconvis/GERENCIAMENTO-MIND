@@ -914,7 +914,7 @@ def api_concluir_fase(oid):
         return jsonify({"erro": "Este módulo não possui um fluxo de etapas pré-definido."}), 400
     
     # Se é funcionário, redirecionar para a lógica de aprovação
-    if u.perfil == "funcionario":
+    if u.perfil_efetivo == "funcionario":
         fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
         if not fase_ativa:
             return jsonify({"erro": "Nenhuma fase ativa para este módulo."}), 400
@@ -1385,7 +1385,7 @@ def api_kanban():
     filtro_func_id = None
     # Funcionário usado para calcular a relação de cada card
     relacao_func_id = None
-    if u.perfil == "funcionario":
+    if u.perfil_efetivo == "funcionario":
         if not u.funcionario:
             # Usuário sem funcionário vinculado não tem cards
             filtro_func_id = -1

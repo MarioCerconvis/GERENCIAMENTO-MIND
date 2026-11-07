@@ -347,7 +347,8 @@ async function loadUsuarios() {
         tr.innerHTML = `
             <td>${u.nome}</td>
             <td>${u.email}</td>
-            <td><span class="tag">${u.perfil}</span></td>
+            <td><span class="tag">${u.perfil}</span>${u.admin_por_funcao && u.perfil_cadastrado !== "admin"
+                ? ` <span style="font-size:11px;color:var(--text-muted);" title="Admin por ter função de Diretor ou Gerente">(pela função; cadastrado: ${u.perfil_cadastrado})</span>` : ""}</td>
             <td>${u.ativo ? "✅" : "❌"}</td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="editUsuario(${u.id})">Editar</button>
@@ -377,10 +378,11 @@ function openUsuarioModal(userData = null) {
         <div class="form-group">
             <label>Perfil *</label>
             <select id="admin-perfil">
-                <option value="funcionario" ${isEdit && userData.perfil === 'funcionario' ? 'selected' : ''}>Funcionário</option>
-                <option value="gestor" ${isEdit && userData.perfil === 'gestor' ? 'selected' : ''}>Gestor</option>
-                <option value="admin" ${isEdit && userData.perfil === 'admin' ? 'selected' : ''}>Admin</option>
+                <option value="funcionario" ${isEdit && userData.perfil_cadastrado === 'funcionario' ? 'selected' : ''}>Funcionário</option>
+                <option value="gestor" ${isEdit && userData.perfil_cadastrado === 'gestor' ? 'selected' : ''}>Gestor</option>
+                <option value="admin" ${isEdit && userData.perfil_cadastrado === 'admin' ? 'selected' : ''}>Admin</option>
             </select>
+            <p style="font-size:12px;color:var(--text-muted);margin-top:6px;">Quem tem a função Diretor ou Gerente (aba Funcionários) tem acesso de admin, qualquer que seja o perfil aqui.</p>
         </div>
         ${!isEdit ? `<div class="form-group"><label>Senha</label><input type="password" id="admin-senha" placeholder="Padrão: Trocar@123"></div>` : ''}
     `;
