@@ -920,6 +920,66 @@ def api_deletar_objeto(oid):
 #  API: KANBAN — Mover objeto entre fases
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _etapa_do_roadmap_para(objeto, fase_id):
+    """Etapa do roadmap que corresponde a mover o card para `fase_id`: a próxima
+    ocorrência depois da etapa atual; se não houver (retrabalho), a mais recente antes."""
+    etapas = parse_etapas(objeto.etapas_pre_definidas)
+    if not etapas:
+        return None
+    idx = objeto.calcular_indice_fase_atual() if objeto.fase_atual_id else -1
+    for etapa in etapas[idx + 1:]:
+        if etapa["fase_id"] == fase_id:
+            return etapa
+    for etapa in reversed(etapas[:idx + 1]):
+        if etapa["fase_id"] == fase_id:
+            return etapa
+    return None
+
+
+def _abrir_fase(objeto, fase_id, etapa=None, data_limite=None, responsavel_id=None, prazo_padrao_modulo=True):
+    """Encerra a fase em andamento e abre `fase_id` (não faz commit).
+
+    Se a etapa do roadmap tiver funcionário, ele entra na equipe da fase nova e
+    vira o responsável. Prazo: o informado > o da etapa > o do módulo (se
+    `prazo_padrao_modulo`). Usada tanto pelo "Concluído" quanto por mover/arrastar.
+    """
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=objeto.id, data_saida=None).first()
+    afetados = []
+    if fase_ativa:
+        fase_ativa.data_saida = datetime.utcnow()
+        afetados = [f.id_func for f in fase_ativa.funcionarios]  # liberam a posição na fila
+
+    if data_limite is None and etapa and etapa.get("data_limite"):
+        try:
+            data_limite = date.fromisoformat(etapa["data_limite"])
+        except (ValueError, TypeError):
+            data_limite = None
+    if data_limite is None and prazo_padrao_modulo:
+        data_limite = objeto.data_limite
+
+    funcionario = None
+    if etapa and etapa.get("funcionario_id"):
+        funcionario = db.session.get(Funcionario, etapa["funcionario_id"])
+    novo_responsavel = responsavel_id or (funcionario.id_func if funcionario else None)
+
+    of = ObjetoFase(
+        objeto_id=objeto.id,
+        id_fase=fase_id,
+        responsavel_fase_id=novo_responsavel or objeto.responsavel_id,
+        data_limite=data_limite,
+    )
+    db.session.add(of)
+    objeto.fase_atual_id = fase_id
+    if novo_responsavel:
+        objeto.responsavel_id = novo_responsavel
+    db.session.flush()
+    if funcionario:
+        of.funcionarios.append(funcionario)  # entra no fim da fila
+        afetados.append(funcionario.id_func)
+    renumerar_prioridades(*afetados)
+    return of
+
+
 @app.route("/api/objetos/<int:oid>/mover-fase", methods=["POST"])
 @requer_perfil_api("admin", "gestor")
 def api_mover_fase(oid):
@@ -934,29 +994,17 @@ def api_mover_fase(oid):
     if o.concluido_em:
         return jsonify({"erro": "Este módulo já foi concluído. Reabra o módulo para movê-lo."}), 400
     
-    # Fechar fase atual
-    fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
-    equipe_anterior = []
-    if fase_ativa:
-        fase_ativa.data_saida = datetime.utcnow()
-        equipe_anterior = [f.id_func for f in fase_ativa.funcionarios]
-        
     data_limite_fase_str = body.get("data_limite_fase")
     data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else None
-    
-    # Abrir nova fase
-    of = ObjetoFase(
-        objeto_id=oid,
-        id_fase=nova_fase_id,
-        responsavel_fase_id=body.get("responsavel_fase_id", o.responsavel_id),
-        data_limite=data_limite_fase
+
+    # Mover para uma fase do roadmap aplica o funcionário e o prazo daquela etapa
+    etapa = _etapa_do_roadmap_para(o, nova_fase.id_fase)
+    of = _abrir_fase(
+        o, nova_fase.id_fase, etapa,
+        data_limite=data_limite_fase,
+        responsavel_id=body.get("responsavel_fase_id"),
+        prazo_padrao_modulo=False,
     )
-    db.session.add(of)
-    o.fase_atual_id = nova_fase_id
-    if body.get("responsavel_fase_id"):
-        o.responsavel_id = body["responsavel_fase_id"]
-    # A fase anterior deixou de ser trabalho atual da equipe dela
-    renumerar_prioridades(*equipe_anterior)
     db.session.commit()
     
     # Notificar equipe da nova fase
@@ -1017,45 +1065,8 @@ def _executar_mover_proxima_fase(o, etapas_list):
     if nova_fase.ativa == False:
         return jsonify({"erro": "A próxima fase do fluxo está desativada."}), 400
 
-    # Fechar fase atual
-    fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
-    afetados = []
-    if fase_ativa:
-        fase_ativa.data_saida = datetime.utcnow()
-        afetados = [f.id_func for f in fase_ativa.funcionarios]
-    
-    # Determinar data_limite e responsável da nova fase
-    data_limite_fase = None
-    if proxima_etapa.get("data_limite"):
-        try:
-            data_limite_fase = date.fromisoformat(proxima_etapa["data_limite"])
-        except (ValueError, TypeError):
-            data_limite_fase = None
-    if not data_limite_fase:
-        data_limite_fase = o.data_limite
-    
-    responsavel_fase_id = proxima_etapa.get("funcionario_id") or o.responsavel_id
-        
-    # Abrir nova fase
-    of = ObjetoFase(
-        objeto_id=oid,
-        id_fase=proxima_fase_id,
-        responsavel_fase_id=responsavel_fase_id,
-        data_limite=data_limite_fase
-    )
-    db.session.add(of)
-    o.fase_atual_id = proxima_fase_id
-    
-    # Se há funcionário pré-definido, atribuí-lo automaticamente à fase
-    if proxima_etapa.get("funcionario_id"):
-        func_pre = Funcionario.query.get(proxima_etapa["funcionario_id"])
-        if func_pre:
-            db.session.flush()
-            of.funcionarios.append(func_pre)
-            afetados.append(func_pre.id_func)
-
     # Equipe anterior libera a posição; funcionário pré-definido entra no fim da fila
-    renumerar_prioridades(*afetados)
+    of = _abrir_fase(o, proxima_fase_id, proxima_etapa)
     db.session.commit()
     
     # Notificar equipe da nova fase
