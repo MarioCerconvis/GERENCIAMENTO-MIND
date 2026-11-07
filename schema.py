@@ -42,3 +42,6 @@ def ensure_schema():
 
     # Data de início prevista do módulo
     _adicionar_coluna("objetos", "data_inicio", "DATE NULL")
+
+    # Conclusão do módulo (última fase do roadmap concluída)
+    _adicionar_coluna("objetos", "concluido_em", "DATETIME NULL")

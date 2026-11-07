@@ -92,9 +92,11 @@ function badgesPrioridade(objeto) {
 async function loadBoard() {
     // Admin/Gestor com funcionário selecionado: o backend devolve só os cards dele,
     // com a relação (atual/concluído/futuro) calculada para ele
-    let url = "/api/kanban";
+    const params = new URLSearchParams();
     const funcId = getFuncionarioEmFoco();
-    if (funcId) url += `?funcionario_id=${funcId}`;
+    if (funcId) params.set("funcionario_id", funcId);
+    if (document.getElementById("kanban-mostrar-concluidos")?.checked) params.set("concluidos", "1");
+    const url = "/api/kanban" + (params.toString() ? `?${params}` : "");
     const res = await fetch(url);
     if (!res.ok) return;
     boardData = await res.json();
@@ -167,8 +169,8 @@ function renderBoard(data) {
             });
         }
 
-        // Drag & drop listeners
-        if (["admin", "gestor"].includes(currentUser?.perfil)) {
+        // Drag & drop listeners (a coluna de concluídos não recebe cards)
+        if (["admin", "gestor"].includes(currentUser?.perfil) && col.id !== "concluidos") {
             body.addEventListener("dragover", handleDragOver);
             body.addEventListener("dragleave", handleDragLeave);
             body.addEventListener("drop", handleDrop);
@@ -189,7 +191,7 @@ function createCard(projeto) {
     // Relationship data for filtering (pendente, concluido, futuro)
     const relacao = projeto.relacao_funcionario || [];
     card.dataset.relacaoFuncionario = relacao.join(",");
-    card.draggable = ["admin", "gestor"].includes(currentUser?.perfil);
+    card.draggable = ["admin", "gestor"].includes(currentUser?.perfil) && !projeto.concluido_em;
 
     const sla = projeto.sla || {};
     const slaClass = sla.flag === "Dentro do SLA" ? "sla-dentro" : "sla-fora";
@@ -217,7 +219,9 @@ function createCard(projeto) {
         }
     }
 
-    let hasProximaEtapa = projeto.has_proxima_etapa;
+    // Há fase em andamento: "Concluído" avança para a próxima etapa ou, na última, finaliza o módulo
+    const podeConcluir = projeto.pode_concluir_fase;
+    const ultimaEtapa = !projeto.has_proxima_etapa;
 
     // Datas de início previstas: só alertam, nunca movem o card
     const alertas = projeto.alertas_inicio || {};
@@ -250,7 +254,7 @@ function createCard(projeto) {
 
     // Botão de ação
     let actionButton = "";
-    if (hasProximaEtapa) {
+    if (podeConcluir) {
         if (isEmployee && isMultiApproval) {
             if (jaAprovei) {
                 actionButton = `
@@ -266,7 +270,7 @@ function createCard(projeto) {
         } else {
             actionButton = `
                 <div style="margin-top: 8px;">
-                    <button class="btn btn-primary btn-sm" onclick="concluirFasePreDefinida(event, ${projeto.id})" style="width: 100%; background-color: #22c55e; border-color: #22c55e; color: white;">✔ Concluído</button>
+                    <button class="btn btn-primary btn-sm" onclick="concluirFasePreDefinida(event, ${projeto.id}, ${ultimaEtapa})"style="width: 100%; background-color: #22c55e; border-color: #22c55e; color: white;">✔ Concluído</button>
                 </div>`;
         }
     }
@@ -293,6 +297,7 @@ function createCard(projeto) {
             if (r === "futuro") return '<span class="relacao-badge relacao-futuro">🔮 Futuro</span>';
             return '';
         }).join('')}</div>` : ''}
+        ${projeto.concluido_em ? `<div class="concluido-badge">✅ Concluído em ${formatDate(projeto.concluido_em.split("T")[0])}</div>` : ""}
         ${actionButton}
     `;
 
@@ -310,9 +315,12 @@ function createCard(projeto) {
 }
 
 // ─── Concluir Fase Pré-Definida ──────────────────────────────────────────────
-async function concluirFasePreDefinida(event, projetoId) {
+async function concluirFasePreDefinida(event, projetoId, ultimaEtapa = false) {
     event.stopPropagation();
-    if (!confirm("Confirmar a conclusão desta etapa e mover para a próxima do fluxo pré-definido?")) return;
+    const pergunta = ultimaEtapa
+        ? "Esta é a última etapa do roadmap. Concluir e finalizar o módulo?"
+        : "Confirmar a conclusão desta etapa e mover para a próxima do fluxo pré-definido?";
+    if (!confirm(pergunta)) return;
     
     const res = await fetch(`/api/objetos/${projetoId}/concluir-fase`, {
         method: "POST"
@@ -320,7 +328,9 @@ async function concluirFasePreDefinida(event, projetoId) {
 
     if (res.ok) {
         const data = await res.json();
-        if (data.movido) {
+        if (data.concluido) {
+            showToast("Módulo concluído! 🎉", "success");
+        } else if (data.movido) {
             showToast("Fase concluída e movida com sucesso!", "success");
         } else if (data.aprovado) {
             showToast(`Aprovação registrada! (${data.total_aprovacoes || 'Completa'})`, "success");
@@ -345,7 +355,9 @@ async function aprovarFase(event, faseAtivaId) {
 
     if (res.ok) {
         const data = await res.json();
-        if (data.movido) {
+        if (data.concluido) {
+            showToast("Todos aprovaram! Módulo concluído. 🎉", "success");
+        } else if (data.movido) {
             showToast("Todos aprovaram! Card movido para a próxima fase.", "success");
         } else {
             showToast(`Aprovação registrada! (${data.total_aprovacoes || 'Completa'})`, "success");
@@ -411,7 +423,7 @@ async function handleDrop(e) {
     e.preventDefault();
     e.currentTarget.classList.remove("drag-over");
     const newFaseId = e.currentTarget.dataset.faseId;
-    if (!draggedObjetoId || newFaseId === "sem_fase") return;
+    if (!draggedObjetoId || newFaseId === "sem_fase" || newFaseId === "concluidos") return;
 
     let oldFaseId = null;
     boardData.forEach(col => {
@@ -505,6 +517,7 @@ function setupToolbar() {
     document.getElementById("kanban-filter-prioridade").addEventListener("change", () => {
         filterBoard();
     });
+    document.getElementById("kanban-mostrar-concluidos")?.addEventListener("change", loadBoard);
     document.getElementById("kanban-filter-relacao")?.addEventListener("change", () => {
         filterBoard();
         renderRelacaoResumo();
@@ -755,8 +768,7 @@ function adicionarModuloUI(dadosModulo = null) {
     moduloCount++;
     const container = document.getElementById("modulos-list");
     
-    const responsavelOptions = allFuncionarios.map(f => `<option value="${f.id}" ${dadosModulo && dadosModulo.responsavel_id === f.id ? 'selected' : ''}>${f.nome}</option>`).join("");
-    const faseOptions = allFases.map(f => `<option value="${f.id}" ${dadosModulo && dadosModulo.fase_atual_id === f.id ? 'selected' : ''}>${f.nome}</option>`).join("");
+const faseOptions = allFases.map(f => `<option value="${f.id}" ${dadosModulo && dadosModulo.fase_atual_id === f.id ? 'selected' : ''}>${f.nome}</option>`).join("");
     
     // Preparar UI do fluxo de fases se estiver editando
     let fluxoHtml = "";
@@ -794,7 +806,7 @@ function adicionarModuloUI(dadosModulo = null) {
                 </div>
                 <div class="form-group">
                     <label>Fase Inicial</label>
-                    <select class="mod-fase">
+                    <select class="mod-fase" onchange="onFaseInicialChange(this)">
                         <option value="">Sem fase</option>
                         ${faseOptions}
                     </select>
@@ -815,11 +827,11 @@ function adicionarModuloUI(dadosModulo = null) {
 
             <div class="form-row">
                 <div class="form-group">
-                    <label>Responsável</label>
-                    <select class="mod-responsavel">
-                        <option value="">(Mesmo da OS se vazio)</option>
-                        ${responsavelOptions}
+                    <label>Funcionário da Fase Inicial</label>
+                    <select class="mod-funcionario" disabled>
+                        <option value="">Selecione a fase inicial primeiro</option>
                     </select>
+                    <small style="color:#94a3b8;">Já entra na equipe da fase inicial e na fila de prioridades dele.</small>
                 </div>
             </div>
             
@@ -884,6 +896,22 @@ window.onFluxoFaseChange = async function(selectEl) {
     }
 }
 
+// Fase inicial escolhida: lista só os funcionários com as funções exigidas por ela
+async function onFaseInicialChange(selectFase) {
+    const select = selectFase.closest(".modulo-item").querySelector(".mod-funcionario");
+    const atual = select.value;
+    if (!selectFase.value) {
+        select.innerHTML = '<option value="">Selecione a fase inicial primeiro</option>';
+        select.disabled = true;
+        return;
+    }
+    const elegiveis = await funcionariosElegiveis(parseInt(selectFase.value));
+    select.innerHTML = '<option value="">-- A definir --</option>' + elegiveis
+        .map(f => `<option value="${f.id}" ${String(f.id) === atual ? "selected" : ""}>${f.nome}</option>`)
+        .join("");
+    select.disabled = false;
+}
+
 function removerModuloUI(id) {
     document.getElementById(id).remove();
     moduloCount--;
@@ -941,7 +969,7 @@ async function saveProject() {
             const modFase = mod.querySelector(".mod-fase").value;
             const modData = mod.querySelector(".mod-data").value;
             const modDataInicio = mod.querySelector(".mod-data-inicio").value;
-            const modResp = mod.querySelector(".mod-responsavel").value;
+            const modFunc = mod.querySelector(".mod-funcionario").value;
             const modDesc = mod.querySelector(".mod-descricao").value;
             const modEtapas = Array.from(mod.querySelectorAll(".fluxo-step-item")).map(step => {
                 const faseId = step.querySelector(".mod-etapa-step-fase")?.value;
@@ -959,7 +987,7 @@ async function saveProject() {
                 fase_id: modFase ? parseInt(modFase) : null,
                 data_inicio: modDataInicio || null,
                 data_limite: modData || null,
-                responsavel_id: modResp ? parseInt(modResp) : null,
+                funcionario_id: modFunc ? parseInt(modFunc) : null,
                 descricao: modDesc,
                 etapas_pre_definidas: modEtapas.length > 0 ? modEtapas : null
             });
@@ -1089,8 +1117,18 @@ async function openDetail(objetoId) {
         `;
     }
 
+    // ── Módulo concluído ──
+    if (p.concluido_em) {
+        html += `
+            <div class="concluido-detalhe">
+                <span>✅ Módulo concluído em ${formatDateTime(p.concluido_em)}</span>
+                ${["admin", "gestor"].includes(currentUser?.perfil) ? `<button class="btn btn-ghost btn-sm" onclick="reabrirModulo(${p.id})">Reabrir módulo</button>` : ""}
+            </div>
+        `;
+    }
+
     // ── Mover fase inline (para admin/gestor) ──
-    if (["admin", "gestor"].includes(currentUser?.perfil)) {
+    if (["admin", "gestor"].includes(currentUser?.perfil) && !p.concluido_em) {
         const faseOptions = allFases.map(f => {
             const sel = f.id === p.fase_atual_id ? "selected" : "";
             return `<option value="${f.id}" ${sel}>${f.nome}</option>`;
@@ -1273,6 +1311,21 @@ async function mudarPrioridadeFuncionario(funcionarioId, objetoFaseId, posicao, 
     }
     await loadBoard();
     openDetail(objetoId);
+}
+
+// ─── Reabrir módulo concluído ────────────────────────────────────────────────
+
+async function reabrirModulo(objetoId) {
+    if (!confirm("Reabrir este módulo? Ele volta para a última fase, com a mesma equipe.")) return;
+    const res = await fetch(`/api/objetos/${objetoId}/reabrir`, { method: "POST" });
+    if (res.ok) {
+        showToast("Módulo reaberto!", "success");
+        await loadBoard();
+        openDetail(objetoId);
+    } else {
+        const err = await res.json();
+        showToast(err.erro || "Erro ao reabrir módulo", "error");
+    }
 }
 
 // ─── Mover fase pelo detalhe ─────────────────────────────────────────────────
@@ -1611,6 +1664,42 @@ async function linhaEtapaEditavel(etapa, idx, total, travado) {
     `;
 }
 
+// Etapa atual: a fase não muda, mas funcionário e datas sim (valem para a fase em andamento)
+async function linhaEtapaAtualEditavel(etapa, idx) {
+    const fase = allFases.find(f => f.id === etapa.fase_id);
+    const cor = fase?.cor || "#94a3b8";
+    const elegiveis = await funcionariosElegiveis(etapa.fase_id);
+    const funcOpts = elegiveis.map(f =>
+        `<option value="${f.id}" ${f.id === etapa.funcionario_id ? "selected" : ""}>${escHtml(f.nome)}</option>`
+    ).join("");
+    return `
+        <li class="rm-etapa atual" style="--fase-cor:${cor};" data-idx="${idx}">
+            <span class="rm-etapa-num" style="background:${cor};color:#fff;">${idx + 1}</span>
+            <div class="rm-etapa-campos">
+                <div class="rm-campo">
+                    <span>Fase atual 🔒</span>
+                    <div class="rm-etapa-fase" style="color:${cor};padding:8px 0;">${escHtml(fase?.nome || `Fase #${etapa.fase_id}`)}</div>
+                </div>
+                <label class="rm-campo">
+                    <span>Funcionário</span>
+                    <select class="input-select" onchange="alterarEtapaRoadmap(${idx}, 'funcionario_id', this.value)">
+                        <option value="">-- A definir --</option>${funcOpts}
+                    </select>
+                </label>
+                <label class="rm-campo">
+                    <span>Início previsto</span>
+                    <input type="date" value="${etapa.data_inicio || ""}" onchange="alterarEtapaRoadmap(${idx}, 'data_inicio', this.value)">
+                </label>
+                <label class="rm-campo">
+                    <span>Prazo da fase</span>
+                    <input type="date" value="${etapa.data_limite || ""}" onchange="alterarEtapaRoadmap(${idx}, 'data_limite', this.value)">
+                </label>
+            </div>
+            <span class="rm-etapa-tag">Atual</span>
+        </li>
+    `;
+}
+
 function linhaEtapaTravada(etapa, idx, atual) {
     const fase = allFases.find(f => f.id === etapa.fase_id);
     const cor = fase?.cor || "#94a3b8";
@@ -1636,19 +1725,21 @@ async function renderPainelRoadmap() {
     const isAdmin = currentUser?.perfil === "admin";
     const unico = (rm.projeto?.objetos || []).length <= 1;
 
+    const concluido = !novo && !!mod?.concluido_em;
     const linhas = [];
     for (let idx = 0; idx < rm.etapas.length; idx++) {
-        linhas.push(idx <= travado
-            ? linhaEtapaTravada(rm.etapas[idx], idx, idx === travado)
-            : await linhaEtapaEditavel(rm.etapas[idx], idx, rm.etapas.length, travado));
+        if (concluido || idx < travado) {
+            linhas.push(linhaEtapaTravada(rm.etapas[idx], idx, idx === travado && !concluido));
+        } else if (idx === travado) {
+            linhas.push(await linhaEtapaAtualEditavel(rm.etapas[idx], idx));
+        } else {
+            linhas.push(await linhaEtapaEditavel(rm.etapas[idx], idx, rm.etapas.length, travado));
+        }
     }
 
     let cabecalho;
     if (novo) {
-        const respOpts = allFuncionarios.map(f =>
-            `<option value="${f.id}" ${String(f.id) === rm.novo.responsavel_id ? "selected" : ""}>${escHtml(f.nome)}</option>`
-        ).join("");
-        cabecalho = `
+cabecalho = `
             <div class="rm-painel-header"><h3>Novo módulo</h3></div>
             <div class="form-row">
                 <div class="form-group">
@@ -1665,16 +1756,12 @@ async function renderPainelRoadmap() {
                 </div>
             </div>
             <div class="form-row">
-                <div class="form-group">
-                    <label for="rm-novo-resp">Responsável</label>
-                    <select id="rm-novo-resp" onchange="rm.novo.responsavel_id = this.value"><option value="">(Mesmo da OS se vazio)</option>${respOpts}</select>
-                </div>
-                <div class="form-group">
+<div class="form-group">
                     <label for="rm-novo-desc">Descrição</label>
                     <input type="text" id="rm-novo-desc" value="${escHtml(rm.novo.descricao)}" oninput="rm.novo.descricao = this.value">
                 </div>
             </div>
-            <p class="rm-ajuda">A primeira etapa é a fase em que o módulo começa.</p>
+            <p class="rm-ajuda">A primeira etapa é a fase em que o módulo começa; o funcionário dela já entra na equipe dessa fase.</p>
         `;
     } else {
         const foraDoRoadmap = mod?.fase_atual_id && travado === -1 && rm.etapas.length > 0;
@@ -1702,8 +1789,10 @@ async function renderPainelRoadmap() {
                     <input type="date" value="${rm.datasModulo.data_limite || ""}" required onchange="rm.datasModulo.data_limite = this.value; marcarRoadmapAlterado()">
                 </label>
             </div>
-            <p class="rm-ajuda">Etapas cumpridas e a etapa atual ficam travadas 🔒. As próximas podem ser editadas, reordenadas ou removidas.
-            Datas de início são previsões: o card só avança quando a fase atual é concluída.</p>
+            ${concluido
+                ? `<p class="rm-aviso">✅ Módulo concluído em ${formatDateTime(mod.concluido_em)}. Para alterar o roadmap, reabra o módulo pelo detalhe do card.</p>`
+                : `<p class="rm-ajuda">Etapas cumpridas ficam travadas 🔒. Na etapa atual a fase não muda, mas o funcionário e as datas podem ser trocados — o novo funcionário assume a fase em andamento. As próximas etapas podem ser editadas, reordenadas ou removidas.
+            Datas de início são previsões: o card só avança quando a fase atual é concluída.</p>`}
             ${foraDoRoadmap ? `<p class="rm-aviso">A fase atual (${escHtml(mod.fase_atual_nome)}) não faz parte do roadmap: ao concluir, o card irá para a etapa 1.</p>` : ""}
         `;
     }
@@ -1713,8 +1802,8 @@ async function renderPainelRoadmap() {
         <ol class="rm-etapas">
             ${linhas.join("") || `<li class="rm-vazio">Nenhuma etapa. Adicione a primeira abaixo.</li>`}
         </ol>
-        <button type="button" class="btn btn-ghost rm-adicionar" onclick="adicionarEtapaRoadmap()">+ Adicionar etapa</button>
-        <div class="rm-painel-rodape">
+        ${concluido ? "" : `<button type="button" class="btn btn-ghost rm-adicionar" onclick="adicionarEtapaRoadmap()">+ Adicionar etapa</button>`}
+        <div class="rm-painel-rodape" ${concluido ? 'style="display:none;"' : ""}>
             <span id="rm-status" class="rm-status" style="visibility:${rm.dirty ? "visible" : "hidden"};">Alterações não salvas</span>
             ${novo ? "" : `<button type="button" class="btn btn-ghost" onclick="descartarRoadmap()">Descartar</button>`}
             <button type="button" class="btn btn-primary" id="rm-salvar" onclick="${novo ? "criarModuloRoadmap()" : "salvarRoadmap()"}">
@@ -1835,7 +1924,7 @@ async function criarModuloRoadmap() {
         descricao: rm.novo.descricao.trim(),
         data_inicio: rm.novo.data_inicio || null,
         data_limite: rm.novo.data_limite || null,
-        responsavel_id: rm.novo.responsavel_id ? parseInt(rm.novo.responsavel_id) : null,
+        funcionario_id: rm.etapas[0].funcionario_id || null,
         fase_id: rm.etapas[0].fase_id,
         etapas_pre_definidas: rm.etapas,
     };
@@ -2053,6 +2142,15 @@ async function buscarHistorico() {
                                     <div class="timeline-meta">
                                         <span><i class="fa-regular fa-clock"></i> ${dataLabel}</span>
                                         <span><i class="fa-solid fa-user-tag"></i> ${respLabel}</span>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (ev.tipo === "conclusao") {
+                            html += `
+                                <div class="timeline-item" style="--item-color: var(--success);">
+                                    <div class="timeline-fase" style="color: var(--success);">✅ Módulo concluído</div>
+                                    <div class="timeline-meta">
+                                        <span><i class="fa-regular fa-clock"></i> ${ev.data_str}</span>
                                     </div>
                                 </div>
                             `;

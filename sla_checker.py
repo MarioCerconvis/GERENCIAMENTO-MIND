@@ -29,6 +29,7 @@ def verificar_sla_projetos():
     objetos_atrasados = Objeto.query.filter(
         Objeto.data_limite < hoje,
         Objeto.fase_atual_id.isnot(None),  # Só objetos ativos
+        Objeto.concluido_em.is_(None),     # Módulos concluídos não geram alerta
     ).all()
 
     count_obj = 0

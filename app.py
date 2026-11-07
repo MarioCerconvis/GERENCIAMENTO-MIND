@@ -518,68 +518,20 @@ def api_criar_projeto():
     db.session.add(novo_proj)
     db.session.flush()
 
+    atribuidos = []
     for obj_data in objetos_data:
-        fase_id = obj_data.get("fase_id")
-        
-        # O data_limite do módulo
-        obj_data_limite_str = obj_data.get("data_limite")
-        obj_data_limite = date.fromisoformat(obj_data_limite_str) if obj_data_limite_str else novo_proj.data_limite
-        
-        # O data limite da fase (se diferente, mas na UI só tem um, então usaremos o do módulo)
-        data_limite_fase = obj_data_limite
-        
-        # Se não enviou nome, usa nome padrão
-        nome_obj = obj_data.get("nome", "").strip() or "Módulo 1"
-
+        dados = {**obj_data, "nome": (obj_data.get("nome") or "").strip() or "Módulo 1"}
         try:
-            etapas = normalizar_etapas(obj_data.get("etapas_pre_definidas"))
-            obj_data_inicio = datas_do_modulo(obj_data.get("data_inicio"), obj_data_limite)
+            objeto, fase_ativa, funcionario = _criar_modulo(novo_proj, dados)
         except RoadmapInvalido as e:
             db.session.rollback()
-            return jsonify({"erro": f"Módulo '{nome_obj}': {e}"}), 400
-        obj_data_inicio_str = obj_data_inicio.isoformat() if obj_data_inicio else None
-        # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
-        if isinstance(etapas, list) and fase_id:
-            if not etapas or etapas[0].get("fase_id") != fase_id:
-                etapa_inicial = {
-                    "fase_id": fase_id,
-                    "data_inicio": obj_data_inicio_str,
-                    "data_limite": obj_data_limite_str or None,
-                    "funcionario_id": obj_data.get("responsavel_id") or None,
-                }
-                etapas.insert(0, etapa_inicial)
-        elif fase_id and not etapas:
-            etapas = [{
-                "fase_id": fase_id,
-                "data_inicio": obj_data_inicio_str,
-                "data_limite": obj_data_limite_str or None,
-                "funcionario_id": obj_data.get("responsavel_id") or None,
-            }]
-        etapas_str = serialize_etapas(etapas) if isinstance(etapas, list) else None
-
-        novo_obj = Objeto(
-            projeto_id=novo_proj.projeto_id,
-            nome=nome_obj,
-            descricao=obj_data.get("descricao", ""),
-            data_limite=obj_data_limite,
-            data_inicio=obj_data_inicio,
-            responsavel_id=obj_data.get("responsavel_id", novo_proj.responsavel_id),
-            fase_atual_id=fase_id,
-            etapas_pre_definidas=etapas_str
-        )
-        db.session.add(novo_obj)
-        db.session.flush()
-
-        if fase_id:
-            of = ObjetoFase(
-                objeto_id=novo_obj.id,
-                id_fase=fase_id,
-                responsavel_fase_id=novo_obj.responsavel_id,
-                data_limite=data_limite_fase
-            )
-            db.session.add(of)
+            return jsonify({"erro": f"Módulo '{dados['nome']}': {e}"}), 400
+        if funcionario:
+            atribuidos.append((funcionario, fase_ativa, objeto))
 
     db.session.commit()
+    for funcionario, fase_ativa, objeto in atribuidos:
+        notificar_atribuicao(funcionario, novo_proj, fase_ativa.fase, objeto)
     return jsonify(novo_proj.to_dict()), 201
 
 
@@ -688,13 +640,97 @@ def normalizar_etapas(etapas):
     return resultado
 
 
-def validar_roadmap_editado(objeto, novas_etapas):
-    """Garante que a edição só altera etapas futuras.
+def _validar_elegivel(funcionario, fase, rotulo):
+    """O funcionário precisa ter uma das funções exigidas pela fase (se houver)."""
+    if fase.funcoes_exigidas:
+        exigidas = {f.id_funcao for f in fase.funcoes_exigidas}
+        if not exigidas.intersection(f.id_funcao for f in funcionario.funcoes):
+            nomes = ", ".join(f.nome_funcao for f in fase.funcoes_exigidas)
+            raise RoadmapInvalido(f"{rotulo} ({fase.nome_fase}): {funcionario.nome} não possui as funções exigidas ({nomes}).")
 
-    As etapas já cumpridas e a etapa atual (até indice_fase_atual) precisam
-    continuar iguais e na mesma posição: o cálculo da próxima fase depende delas.
-    Etapas futuras novas não podem usar fases desativadas.
+
+def _criar_modulo(projeto, dados):
+    """Cria um módulo (Objeto) com roadmap e a fase inicial em andamento.
+
+    O funcionário da fase inicial (`funcionario_id`; `responsavel_id` é aceito por
+    compatibilidade) é colocado na equipe da fase — entra na fila de prioridades
+    dele e vê o card como atual —, igual ao que já acontece nas fases seguintes.
+    Retorna (objeto, fase_ativa, funcionario_atribuido). Levanta RoadmapInvalido.
     """
+    fase = None
+    fase_id = dados.get("fase_id") or None
+    if fase_id:
+        fase = db.session.get(Fase, int(fase_id))
+        if not fase or fase.ativa == False:
+            raise RoadmapInvalido("Fase inicial inválida ou desativada.")
+
+    data_limite_str = _data_iso_ou_none(dados.get("data_limite"), "Data limite do módulo")
+    data_limite = date.fromisoformat(data_limite_str) if data_limite_str else projeto.data_limite
+    data_inicio = datas_do_modulo(dados.get("data_inicio"), data_limite)
+    etapas = normalizar_etapas(dados.get("etapas_pre_definidas")) or []
+
+    # A fase inicial é SEMPRE a primeira etapa do roadmap
+    if fase and (not etapas or etapas[0]["fase_id"] != fase.id_fase):
+        etapas.insert(0, {
+            "fase_id": fase.id_fase,
+            "data_inicio": data_inicio.isoformat() if data_inicio else None,
+            "data_limite": data_limite_str,
+            "funcionario_id": None,
+        })
+
+    funcionario = None
+    func_id = dados.get("funcionario_id") or dados.get("responsavel_id") or (etapas[0]["funcionario_id"] if fase else None)
+    if func_id:
+        funcionario = db.session.get(Funcionario, int(func_id))
+        if not funcionario:
+            raise RoadmapInvalido("Funcionário da fase inicial não encontrado.")
+        if fase:
+            _validar_elegivel(funcionario, fase, "Fase inicial")
+            etapas[0]["funcionario_id"] = funcionario.id_func
+
+    objeto = Objeto(
+        projeto_id=projeto.projeto_id,
+        nome=(dados.get("nome") or "").strip(),
+        descricao=dados.get("descricao") or "",
+        data_limite=data_limite,
+        data_inicio=data_inicio,
+        responsavel_id=funcionario.id_func if funcionario else projeto.responsavel_id,
+        fase_atual_id=fase.id_fase if fase else None,
+        etapas_pre_definidas=serialize_etapas(etapas) if etapas else None,
+    )
+    db.session.add(objeto)
+    db.session.flush()
+
+    fase_ativa = None
+    if fase:
+        # Prazo da fase inicial: o informado, senão o da 1ª etapa, senão o do módulo
+        prazo_str = dados.get("fase_data_limite") or etapas[0].get("data_limite")
+        fase_ativa = ObjetoFase(
+            objeto_id=objeto.id,
+            id_fase=fase.id_fase,
+            responsavel_fase_id=objeto.responsavel_id,
+            data_limite=date.fromisoformat(prazo_str) if prazo_str else data_limite,
+        )
+        db.session.add(fase_ativa)
+        db.session.flush()
+        if funcionario:
+            fase_ativa.funcionarios.append(funcionario)
+            renumerar_prioridades(funcionario.id_func)  # entra no fim da fila
+
+    return objeto, fase_ativa, (funcionario if fase_ativa else None)
+
+
+def validar_roadmap_editado(objeto, novas_etapas):
+    """Garante que a edição não reescreve o passado.
+
+    As etapas já cumpridas e a fase da etapa atual (até indice_fase_atual)
+    precisam continuar iguais e na mesma posição: o cálculo da próxima fase
+    depende delas. Na etapa atual, funcionário e datas podem mudar (o funcionário
+    novo é aplicado à fase em andamento). Etapas futuras novas não podem usar
+    fases desativadas.
+    """
+    if objeto.concluido_em:
+        raise RoadmapInvalido("Este módulo já foi concluído. Reabra o módulo para alterar o roadmap.")
     antigas = parse_etapas(objeto.etapas_pre_definidas)
     idx = objeto.calcular_indice_fase_atual() if objeto.fase_atual_id and antigas else -1
 
@@ -702,16 +738,71 @@ def validar_roadmap_editado(objeto, novas_etapas):
         travadas = [e["fase_id"] for e in antigas[:idx + 1]]
         if [e["fase_id"] for e in novas_etapas[:idx + 1]] != travadas:
             raise RoadmapInvalido(
-                "As etapas já cumpridas e a etapa atual não podem ser alteradas, removidas ou reordenadas."
+                "As etapas já cumpridas e a fase da etapa atual não podem ser alteradas, removidas ou reordenadas."
             )
-        # Mantém os dados originais das etapas travadas
-        novas_etapas[:idx + 1] = antigas[:idx + 1]
+        # Etapas cumpridas ficam como estavam; na atual, só funcionário e datas mudam
+        atual = novas_etapas[idx]
+        novas_etapas[:idx] = antigas[:idx]
+        novas_etapas[idx] = {
+            **antigas[idx],
+            "funcionario_id": atual.get("funcionario_id"),
+            "data_inicio": atual.get("data_inicio"),
+            "data_limite": atual.get("data_limite"),
+        }
 
     for i, etapa in enumerate(novas_etapas[idx + 1:], start=idx + 2):
         fase = db.session.get(Fase, etapa["fase_id"])
         if fase.ativa == False:
             raise RoadmapInvalido(f"Etapa {i}: a fase '{fase.nome_fase}' está desativada.")
     return novas_etapas
+
+
+def _sincronizar_etapa_atual(objeto, antiga, nova):
+    """Aplica na fase em andamento o funcionário e o prazo da etapa atual.
+
+    Se o funcionário mudou, o anterior sai da equipe; o da etapa entra (também
+    quando já era o mesmo mas não estava na equipe — módulos criados antes de a
+    fase inicial ser atribuída). Retorna o funcionário que entrou na fase, se houver.
+    """
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=objeto.id, data_saida=None).first()
+    if not fase_ativa or antiga is None or nova is None:
+        return None
+
+    afetados, entrou = set(), None
+    antigo_id, novo_id = antiga.get("funcionario_id"), nova.get("funcionario_id")
+    if antigo_id and antigo_id != novo_id:
+        antigo = db.session.get(Funcionario, antigo_id)
+        if antigo and antigo in fase_ativa.funcionarios:
+            fase_ativa.funcionarios.remove(antigo)
+            afetados.add(antigo_id)
+    if novo_id:
+        novo = db.session.get(Funcionario, novo_id)
+        if novo and novo not in fase_ativa.funcionarios:
+            fase_ativa.funcionarios.append(novo)
+            afetados.add(novo_id)
+            entrou = novo
+        if novo:
+            fase_ativa.responsavel_fase_id = novo.id_func
+            objeto.responsavel_id = novo.id_func
+
+    if nova.get("data_limite") and nova.get("data_limite") != antiga.get("data_limite"):
+        fase_ativa.data_limite = date.fromisoformat(nova["data_limite"])
+
+    renumerar_prioridades(*afetados)
+    return entrou
+
+
+def _concluir_modulo(objeto):
+    """Encerra a fase em andamento e marca o módulo como concluído. Faz commit."""
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=objeto.id, data_saida=None).first()
+    agora = datetime.utcnow()
+    equipe = []
+    if fase_ativa:
+        fase_ativa.data_saida = agora
+        equipe = [f.id_func for f in fase_ativa.funcionarios]
+    objeto.concluido_em = agora
+    renumerar_prioridades(*equipe)  # o trabalho sai da fila de quem estava na fase
+    db.session.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -746,16 +837,24 @@ def api_editar_objeto(oid):
         return jsonify({"erro": str(e) if isinstance(e, RoadmapInvalido) else "Data limite inválida."}), 400
     if "responsavel_id" in body:
         o.responsavel_id = body["responsavel_id"]
+    entrou_na_fase = None
     if "etapas_pre_definidas" in body:
         try:
+            antigas = parse_etapas(o.etapas_pre_definidas)
+            idx = o.calcular_indice_fase_atual() if o.fase_atual_id and antigas else -1
             etapas = normalizar_etapas(body["etapas_pre_definidas"]) or []
             etapas = validar_roadmap_editado(o, etapas)
         except RoadmapInvalido as e:
             db.session.rollback()
             return jsonify({"erro": str(e)}), 400
         o.etapas_pre_definidas = serialize_etapas(etapas)
+        if idx >= 0:
+            # Funcionário/prazo da etapa atual valem para a fase em andamento
+            entrou_na_fase = _sincronizar_etapa_atual(o, antigas[idx], etapas[idx])
 
     db.session.commit()
+    if entrou_na_fase:
+        notificar_atribuicao(entrou_na_fase, o.projeto, o.fase_atual, o)
     return jsonify(o.to_dict())
 
 
@@ -772,69 +871,15 @@ def api_criar_objeto(pid):
     if not nome:
         return jsonify({"erro": "Nome do módulo é obrigatório"}), 400
         
-    fase_id = body.get("fase_id")
-    if fase_id:
-        fase_inicial = db.session.get(Fase, fase_id)
-        if not fase_inicial or fase_inicial.ativa == False:
-            return jsonify({"erro": "Fase inicial inválida ou desativada."}), 400
-    data_limite_str = body.get("data_limite")
     try:
-        data_limite = date.fromisoformat(data_limite_str) if data_limite_str else p.data_limite
-    except ValueError:
-        return jsonify({"erro": "Data limite do módulo inválida."}), 400
-    responsavel_id = body.get("responsavel_id") or p.responsavel_id
-
-    try:
-        etapas = normalizar_etapas(body.get("etapas_pre_definidas"))
-        data_inicio = datas_do_modulo(body.get("data_inicio"), data_limite)
+        novo_obj, fase_ativa, funcionario = _criar_modulo(p, {**body, "nome": nome})
     except RoadmapInvalido as e:
+        db.session.rollback()
         return jsonify({"erro": str(e)}), 400
-    # Garantir que a Fase Inicial seja SEMPRE a primeira etapa do roadmap
-    if isinstance(etapas, list) and fase_id:
-        if not etapas or etapas[0].get("fase_id") != fase_id:
-            etapa_inicial = {
-                "fase_id": fase_id,
-                "data_inicio": data_inicio.isoformat() if data_inicio else None,
-                "data_limite": data_limite_str or None,
-                "funcionario_id": responsavel_id or None,
-            }
-            etapas.insert(0, etapa_inicial)
-    elif fase_id and not etapas:
-        etapas = [{
-            "fase_id": fase_id,
-            "data_inicio": data_inicio.isoformat() if data_inicio else None,
-            "data_limite": data_limite_str or None,
-            "funcionario_id": responsavel_id or None,
-        }]
-    etapas_str = serialize_etapas(etapas) if isinstance(etapas, list) else None
-
-    novo_obj = Objeto(
-        projeto_id=pid,
-        nome=nome,
-        descricao=body.get("descricao", ""),
-        data_limite=data_limite,
-        data_inicio=data_inicio,
-        responsavel_id=responsavel_id,
-        fase_atual_id=fase_id,
-        etapas_pre_definidas=etapas_str
-    )
-    db.session.add(novo_obj)
-    db.session.flush()
-
-    if fase_id:
-        # Prazo da fase inicial: o informado, senão o da 1ª etapa, senão o do módulo
-        # (mesma regra da criação da OS)
-        data_limite_fase_str = body.get("fase_data_limite") or (etapas[0].get("data_limite") if etapas else None)
-        data_limite_fase = date.fromisoformat(data_limite_fase_str) if data_limite_fase_str else data_limite
-        of = ObjetoFase(
-            objeto_id=novo_obj.id,
-            id_fase=fase_id,
-            responsavel_fase_id=responsavel_id,
-            data_limite=data_limite_fase
-        )
-        db.session.add(of)
 
     db.session.commit()
+    if funcionario:
+        notificar_atribuicao(funcionario, p, fase_ativa.fase, novo_obj)
     return jsonify(novo_obj.to_dict()), 201
 
 
@@ -872,6 +917,8 @@ def api_mover_fase(oid):
     nova_fase = Fase.query.get_or_404(nova_fase_id)
     if nova_fase.ativa == False:
         return jsonify({"erro": "Esta fase está desativada e não pode receber novos cards."}), 400
+    if o.concluido_em:
+        return jsonify({"erro": "Este módulo já foi concluído. Reabra o módulo para movê-lo."}), 400
     
     # Fechar fase atual
     fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
@@ -909,19 +956,24 @@ def api_mover_fase(oid):
 def api_concluir_fase(oid):
     o = Objeto.query.get_or_404(oid)
     u = get_usuario_logado()
+    if o.concluido_em:
+        return jsonify({"erro": "Este módulo já foi concluído."}), 400
     etapas_list = parse_etapas(o.etapas_pre_definidas)
-    if not etapas_list:
-        return jsonify({"erro": "Este módulo não possui um fluxo de etapas pré-definido."}), 400
-    
+    fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
+
     # Se é funcionário, redirecionar para a lógica de aprovação
     if u.perfil_efetivo == "funcionario":
-        fase_ativa = ObjetoFase.query.filter_by(objeto_id=oid, data_saida=None).first()
         if not fase_ativa:
             return jsonify({"erro": "Nenhuma fase ativa para este módulo."}), 400
         return _aprovar_fase_funcionario(fase_ativa, u, o)
-    
-    # Admin/Gestor: mover direto (override)
-    return _executar_mover_proxima_fase(o, etapas_list)
+
+    # Admin/Gestor: avança direto (override); na última etapa, conclui o módulo
+    if etapas_list and o.has_proxima_etapa():
+        return _executar_mover_proxima_fase(o, etapas_list)
+    if not fase_ativa:
+        return jsonify({"erro": "Nenhuma fase ativa para este módulo."}), 400
+    _concluir_modulo(o)
+    return jsonify({**o.to_dict(), "concluido": True})
 
 
 def _executar_mover_proxima_fase(o, etapas_list):
@@ -1048,13 +1100,15 @@ def api_remover_funcionario_fase(of_id):
         
         # Após remoção, verificar se todos os restantes já aprovaram
         # e se há fluxo pré-definido para auto-mover
-        if of.data_saida is None and of.todos_aprovaram():
+        # (equipe vazia não conta como "todos aprovaram": a fase ficaria sem ninguém)
+        if of.data_saida is None and of.funcionarios and of.todos_aprovaram():
             objeto = db.session.get(Objeto, of.objeto_id)
             if objeto:
                 etapas_list = parse_etapas(objeto.etapas_pre_definidas)
                 if etapas_list and objeto.has_proxima_etapa():
                     result = _executar_mover_proxima_fase(objeto, etapas_list)
                     return result
+                _concluir_modulo(objeto)
     
     return jsonify(of.to_dict())
 
@@ -1120,10 +1174,12 @@ def _aprovar_fase_funcionario(fase_ativa, usuario, objeto):
                 "objeto": objeto.to_dict(),
             })
         else:
+            # Última etapa aprovada por todos: o módulo está concluído
+            _concluir_modulo(objeto)
             return jsonify({
                 "aprovado": True,
                 "movido": False,
-                "mensagem": "Fase aprovada! Esta é a última fase do fluxo.",
+                "concluido": True,
                 "objeto": objeto.to_dict(),
             })
     
@@ -1135,6 +1191,31 @@ def _aprovar_fase_funcionario(fase_ativa, usuario, objeto):
         "total_aprovacoes": f"{aprovados}/{total}",
         "objeto": objeto.to_dict(),
     })
+
+
+@app.route("/api/objetos/<int:oid>/reabrir", methods=["POST"])
+@requer_perfil_api("admin", "gestor")
+def api_reabrir_modulo(oid):
+    """Desfaz a conclusão: reabre a última fase com a mesma equipe (aprovações zeradas)."""
+    o = Objeto.query.get_or_404(oid)
+    if not o.concluido_em:
+        return jsonify({"erro": "Este módulo não está concluído."}), 400
+    ultima = o.historico_fases.first()  # ordenado por data_entrada desc
+    nova = ObjetoFase(
+        objeto_id=o.id,
+        id_fase=ultima.id_fase if ultima else o.fase_atual_id,
+        responsavel_fase_id=ultima.responsavel_fase_id if ultima else o.responsavel_id,
+        data_limite=ultima.data_limite if ultima else o.data_limite,
+    )
+    db.session.add(nova)
+    db.session.flush()
+    equipe = list(ultima.funcionarios) if ultima else []
+    nova.funcionarios = equipe
+    o.fase_atual_id = nova.id_fase
+    o.concluido_em = None
+    renumerar_prioridades(*[f.id_func for f in equipe])
+    db.session.commit()
+    return jsonify(o.to_dict())
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1418,8 +1499,12 @@ def api_kanban():
         else:
             objetos_query = Objeto.query.filter(db.literal(False))
 
+    # Módulos concluídos só aparecem quando pedidos (?concluidos=1)
+    incluir_concluidos = request.args.get("concluidos") == "1"
+    if not incluir_concluidos:
+        objetos_query = objetos_query.filter(Objeto.concluido_em.is_(None))
     objetos = objetos_query.all()
-    
+
     # Montar board
     board = {}
     for fase in fases:
@@ -1429,9 +1514,15 @@ def api_kanban():
             "objetos": [],
         }
     board["sem_fase"] = {"id": None, "nome": "Sem Fase", "cor": "#94a3b8", "ordem": -1, "projetos": [], "objetos": []}
-    
+    if incluir_concluidos:
+        board["concluidos"] = {"id": "concluidos", "nome": "✅ Concluídos", "cor": "#22c55e", "ordem": 10**6,
+                               "projetos": [], "objetos": []}
+
     for o in objetos:
-        key = o.fase_atual_id if o.fase_atual_id and o.fase_atual_id in board else "sem_fase"
+        if o.concluido_em:
+            key = "concluidos"
+        else:
+            key = o.fase_atual_id if o.fase_atual_id and o.fase_atual_id in board else "sem_fase"
         obj_dict = o.to_dict()
         
         # Adicionar relação do funcionário se solicitado
@@ -1580,6 +1671,13 @@ def api_historico_atividade(os_code):
                 "texto": c.texto
             })
             
+        if obj.concluido_em:
+            eventos.append({
+                "tipo": "conclusao",
+                "data": obj.concluido_em,
+                "data_str": obj.concluido_em.strftime("%d/%m/%Y %H:%M"),
+            })
+
         # Ordenar do mais antigo para o mais novo
         eventos.sort(key=lambda x: x["data"])
         

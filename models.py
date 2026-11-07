@@ -279,6 +279,8 @@ class Objeto(db.Model):
     data_limite = db.Column(db.Date, nullable=False) # SLA do objeto
     # Início esperado do módulo. Informativo: não move o card nem muda de fase sozinho
     data_inicio = db.Column(db.Date, nullable=True)
+    # Preenchido quando a última fase do roadmap é concluída (módulo finalizado)
+    concluido_em = db.Column(db.DateTime, nullable=True)
     responsavel_id = db.Column(db.Integer, db.ForeignKey("funcionarios.id_func"), nullable=True)
     fase_atual_id = db.Column(db.Integer, db.ForeignKey("fases.id_fase"), nullable=True)
     etapas_pre_definidas = db.Column(db.Text, nullable=True)  # JSON array de objetos ou CSV legado
@@ -444,6 +446,9 @@ class Objeto(db.Model):
             # Etapas até este índice já foram cumpridas e não podem ser alteradas.
             "indice_fase_atual": self.calcular_indice_fase_atual() if self.fase_atual_id else -1,
             "has_proxima_etapa": self.has_proxima_etapa(),
+            "concluido_em": self.concluido_em.isoformat() if self.concluido_em else None,
+            # Há fase em andamento: o card mostra "Concluído" (avança ou finaliza o módulo)
+            "pode_concluir_fase": fase_ativa is not None and self.concluido_em is None,
             "funcionarios_fase_atual": [
                 {"id": f.id_func, "nome": f.nome}
                 for f in fase_ativa.funcionarios

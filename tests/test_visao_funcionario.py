@@ -41,7 +41,7 @@ class VisaoFuncionarioTest(unittest.TestCase):
             {"nome": "V3-sem-relacao", "fase_id": cls.revisao},
         ])
         cls.obj = {o["nome"]: o["id"] for o in projeto["objetos"]}
-        atribuir(cls.admin, cls.obj["V1-atual-e-futuro"], cls.renato)
+        # Renato, definido na 1ª etapa, já entra na equipe da fase inicial ao criar o módulo
 
     def board(self, client, query=""):
         res = client.get(f"/api/kanban{query}")
@@ -74,8 +74,7 @@ class VisaoFuncionarioTest(unittest.TestCase):
                 {"fase_id": self.envio, "data_limite": None, "funcionario_id": self.luiza},
             ],
         }])
-        oid = projeto["objetos"][0]["id"]
-        atribuir(self.admin, oid, self.renato)
+        oid = projeto["objetos"][0]["id"]  # Renato já atribuído à fase inicial
 
         renato = cliente_logado("renato@mind.com.br")
         res = renato.post(f"/api/objeto-fase/{fase_ativa_id(self.admin, oid)}/aprovar")
