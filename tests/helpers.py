@@ -23,6 +23,13 @@ from models import Usuario, Funcionario, Fase  # noqa: E402
 
 app.config["TESTING"] = True
 
+# Banco de teste é temporário: dispensa o fsync a cada commit (deixa a suíte bem mais rápida)
+from sqlalchemy import event  # noqa: E402
+
+with app.app_context():
+    event.listen(db.engine, "connect", lambda conexao, _: conexao.execute("PRAGMA synchronous=OFF"))
+    db.engine.dispose()
+
 _contador_os = [0]
 
 

@@ -36,8 +36,15 @@ class Config:
         "pool_pre_ping": True,
     }
 
-    # ─── E-mail (SMTP) ───────────────────────────────────────────────────────
+    # ─── E-mail ──────────────────────────────────────────────────────────────
+    # EMAIL_ATIVO=false: os e-mails só aparecem no log (simulação)
     EMAIL_ATIVO = os.environ.get("EMAIL_ATIVO", "false").lower() == "true"
+    # "smtp" (Gmail, Google Workspace, outro servidor) ou "brevo" (API HTTP,
+    # funciona no plano gratuito do PythonAnywhere)
+    EMAIL_PROVEDOR = os.environ.get("EMAIL_PROVEDOR", "smtp").lower()
+    BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+    # Endereço público do sistema, usado no botão "Abrir" dos e-mails
+    APP_URL = os.environ.get("APP_URL", "")
     SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.exemplo.com.br")
     SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
     SMTP_USER = os.environ.get("SMTP_USER", "sistema@exemplo.com.br")
