@@ -109,8 +109,15 @@ class Funcionario(db.Model):
             "nome": self.nome,
             "email": self.email,
             "usuario_id": self.usuario_id,
-            "tem_login": self.usuario is not None,
+            "tem_login": self.usuario is not None and bool(self.usuario.ativo),
             "perfil": self.usuario.perfil_efetivo if self.usuario else None,
+            "acesso": {
+                "ativo": bool(self.usuario.ativo),
+                "perfil_cadastrado": self.usuario.perfil,
+                "perfil": self.usuario.perfil_efetivo,
+                "admin_por_funcao": self.usuario.admin_por_funcao,
+                "trocar_senha": bool(self.usuario.trocar_senha),
+            } if self.usuario else None,
         }
         if include_funcoes:
             d["funcoes"] = [f.to_dict() for f in self.funcoes]

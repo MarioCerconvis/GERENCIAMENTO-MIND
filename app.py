@@ -204,6 +204,79 @@ def vincular_usuarios_funcionarios():
     return vinculados
 
 
+PERFIS = ("admin", "gestor", "funcionario")
+SENHA_PADRAO = "Trocar@123"
+
+
+class ContaConflitante(ValueError):
+    pass
+
+
+def _copiar_dados_para_conta(funcionario):
+    """O funcionário é a fonte de nome e e-mail: a conta de login segue os dele."""
+    u = funcionario.usuario
+    if not u:
+        return
+    outro = Usuario.query.filter(
+        db.func.lower(Usuario.email) == funcionario.email.lower(), Usuario.id != u.id
+    ).first()
+    if outro:
+        raise ContaConflitante(f"Já existe outra conta de acesso com o e-mail {funcionario.email}.")
+    u.email = funcionario.email
+    u.nome = funcionario.nome
+
+
+def sincronizar_contas_com_funcionarios():
+    """Iguala nome e e-mail de cada conta ao do funcionário ligado (usado no boot)."""
+    alteradas = 0
+    for f in Funcionario.query.filter(Funcionario.usuario_id.isnot(None)).all():
+        u = f.usuario
+        if not u or (u.email == f.email and u.nome == f.nome):
+            continue
+        try:
+            _copiar_dados_para_conta(f)
+            alteradas += 1
+        except ContaConflitante as e:
+            print(f"[CONTAS] {f.nome}: {e} Ajuste manualmente.")
+    return alteradas
+
+
+def _definir_acesso(funcionario, ativo, perfil=None):
+    """Liga ou desliga o acesso ao sistema de um funcionário.
+
+    Ligar cria a conta (senha padrão, troca obrigatória no 1º login) se ainda não
+    existir; desligar só desativa a conta, preservando autoria de comentários.
+    """
+    if perfil is not None and perfil not in PERFIS:
+        raise ContaConflitante("Perfil inválido.")
+    u = funcionario.usuario
+    if ativo:
+        if not u:
+            u = Usuario.query.filter(db.func.lower(Usuario.email) == funcionario.email.lower()).first()
+            if u and u.funcionario and u.funcionario.id_func != funcionario.id_func:
+                raise ContaConflitante(f"O e-mail {funcionario.email} já é o login de {u.funcionario.nome}.")
+            if not u:
+                u = Usuario(
+                    nome=funcionario.nome, email=funcionario.email, perfil=perfil or "funcionario",
+                    hash_senha=bcrypt.generate_password_hash(SENHA_PADRAO).decode("utf-8"),
+                    trocar_senha=True,
+                )
+                db.session.add(u)
+                db.session.flush()
+            funcionario.usuario_id = u.id
+            db.session.flush()
+        u.ativo = True
+        if perfil:
+            u.perfil = perfil
+        _copiar_dados_para_conta(funcionario)
+    elif u:
+        me = get_usuario_logado()
+        if me and me.id == u.id:
+            raise ContaConflitante("Você não pode remover o seu próprio acesso.")
+        u.ativo = False
+    return u
+
+
 @app.route("/api/usuarios", methods=["GET"])
 @requer_perfil_api("admin")
 def api_listar_usuarios():
@@ -244,6 +317,8 @@ def api_editar_usuario(uid):
     body = request.get_json()
     if "nome" in body:
         u.nome = body["nome"].strip()
+        if u.funcionario:  # um cadastro só: nome vale para os dois
+            u.funcionario.nome = u.nome
     if "perfil" in body and body["perfil"] in ("admin", "gestor", "funcionario"):
         u.perfil = body["perfil"]
     if "ativo" in body:
@@ -309,6 +384,18 @@ def api_criar_funcionario():
     db.session.add(novo)
     db.session.flush()
     vincular_usuarios_funcionarios()  # usuário (login) com o mesmo e-mail, se existir
+    acesso = body.get("acesso")
+    try:
+        if novo.usuario:
+            _copiar_dados_para_conta(novo)
+        if acesso is not None:
+            if get_usuario_logado().perfil_efetivo != "admin":
+                db.session.rollback()
+                return jsonify({"erro": "Só administradores definem acesso ao sistema."}), 403
+            _definir_acesso(novo, bool(acesso.get("ativo", True)), acesso.get("perfil"))
+    except ContaConflitante as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e)}), 409
     db.session.commit()
     return jsonify(novo.to_dict()), 201
 
@@ -321,7 +408,12 @@ def api_editar_funcionario(fid):
     if "nome" in body:
         f.nome = body["nome"].strip()
     if "email" in body:
-        f.email = body["email"].strip().lower()
+        email = body["email"].strip().lower()
+        if not email:
+            return jsonify({"erro": "E-mail é obrigatório"}), 400
+        if Funcionario.query.filter(Funcionario.email == email, Funcionario.id_func != fid).first():
+            return jsonify({"erro": "Já existe outro funcionário com este e-mail."}), 409
+        f.email = email
     if "funcao_ids" in body:
         funcoes = Funcao.query.filter(Funcao.id_funcao.in_(body["funcao_ids"])).all()
         f.funcoes = funcoes
@@ -329,6 +421,26 @@ def api_editar_funcionario(fid):
         f.usuario_id = body["usuario_id"]
     db.session.flush()
     vincular_usuarios_funcionarios()
+    try:
+        _copiar_dados_para_conta(f)  # login acompanha nome/e-mail do funcionário
+    except ContaConflitante as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e)}), 409
+    db.session.commit()
+    return jsonify(f.to_dict())
+
+
+@app.route("/api/funcionarios/<int:fid>/acesso", methods=["PUT"])
+@requer_perfil_api("admin")
+def api_acesso_funcionario(fid):
+    """Liga/desliga o acesso ao sistema. Body: {"ativo": bool, "perfil": "funcionario|gestor|admin"}."""
+    f = Funcionario.query.get_or_404(fid)
+    body = request.get_json() or {}
+    try:
+        _definir_acesso(f, bool(body.get("ativo")), body.get("perfil"))
+    except ContaConflitante as e:
+        db.session.rollback()
+        return jsonify({"erro": str(e)}), 409
     db.session.commit()
     return jsonify(f.to_dict())
 
@@ -337,6 +449,11 @@ def api_editar_funcionario(fid):
 @requer_perfil_api("admin", "gestor")
 def api_deletar_funcionario(fid):
     f = Funcionario.query.get_or_404(fid)
+    if f.usuario:
+        me = get_usuario_logado()
+        if me.id == f.usuario.id:
+            return jsonify({"erro": "Você não pode excluir o seu próprio cadastro."}), 400
+        f.usuario.ativo = False  # sem funcionário, a conta não deve continuar entrando
     db.session.delete(f)
     db.session.commit()
     return jsonify({"ok": True})
@@ -1883,7 +2000,7 @@ def seed_dados_reais():
 with app.app_context():
     seed_dados_reais()
     seed_admin()
-    if vincular_usuarios_funcionarios():
+    if vincular_usuarios_funcionarios() + sincronizar_contas_com_funcionarios():
         db.session.commit()
     # Fecha as conexões abertas na inicialização. O uWSGI (PythonAnywhere) cria os
     # workers copiando este processo; uma conexão MySQL herdada por vários workers

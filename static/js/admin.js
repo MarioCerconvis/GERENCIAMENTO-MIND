@@ -65,8 +65,8 @@ async function loadFuncionarios() {
             <td>${f.email}</td>
             <td>${funcoes || "—"}</td>
             <td>${f.tem_login
-                ? `<span class="tag" style="white-space:nowrap;" title="Login ligado a este funcionário">✅ ${f.perfil}</span>`
-                : `<span class="tag" style="opacity:0.7;white-space:nowrap;" title="Crie um usuário com o mesmo e-mail na aba Usuários">Sem login</span>`}</td>
+                ? `<span class="tag" style="white-space:nowrap;" title="Entra no sistema com ${f.email}">✅ ${f.perfil}</span>`
+                : `<span class="tag" style="opacity:0.7;white-space:nowrap;" title="Edite o funcionário para dar acesso ao sistema">Sem acesso</span>`}</td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="editFuncionario(${f.id})">Editar</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteFuncionario(${f.id})">Excluir</button>
@@ -99,15 +99,20 @@ async function openFuncionarioModal(funcData = null) {
         </div>
         <div class="form-group">
             <label>Funções</label>
-            <div class="checkbox-list">
+            <div class="checkbox-list" id="admin-funcoes">
                 ${funcoes.map(f => `<label><input type="checkbox" value="${f.id}" ${selectedFuncoes.includes(f.id) ? 'checked' : ''}> ${f.nome}</label>`).join("")}
             </div>
         </div>
+        ${secaoAcesso(funcData)}
     `;
+    const chkAcesso = document.getElementById("acesso-ativo");
+    chkAcesso?.addEventListener("change", () => {
+        document.getElementById("acesso-detalhes").style.display = chkAcesso.checked ? "" : "none";
+    });
 
     document.getElementById("btn-salvar-admin").onclick = async () => {
         const id = document.getElementById("admin-edit-id").value;
-        const funcaoIds = [...document.querySelectorAll("#modal-admin-body input[type=checkbox]:checked")].map(cb => parseInt(cb.value));
+        const funcaoIds = [...document.querySelectorAll("#admin-funcoes input[type=checkbox]:checked")].map(cb => parseInt(cb.value));
         const body = {
             nome: document.getElementById("admin-nome").value,
             email: document.getElementById("admin-email").value,
@@ -116,17 +121,72 @@ async function openFuncionarioModal(funcData = null) {
         const url = id ? `/api/funcionarios/${id}` : "/api/funcionarios";
         const method = id ? "PUT" : "POST";
         const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        if (res.ok) {
-            fecharModal("modal-admin");
-            showToast(id ? "Funcionário atualizado!" : "Funcionário criado!", "success");
-            loadFuncionarios();
-        } else {
+        if (!res.ok) {
             const err = await res.json();
             showToast(err.erro || "Erro", "error");
+            return;
         }
+        const salvo = await res.json();
+
+        // Acesso ao sistema (só admin vê a seção)
+        const chk = document.getElementById("acesso-ativo");
+        if (chk) {
+            const desejado = { ativo: chk.checked, perfil: document.getElementById("acesso-perfil").value };
+            const atual = salvo.acesso;
+            const mudou = desejado.ativo !== !!(atual && atual.ativo)
+                || (desejado.ativo && desejado.perfil !== atual?.perfil_cadastrado);
+            if (mudou) {
+                const r = await fetch(`/api/funcionarios/${salvo.id}/acesso`, {
+                    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(desejado),
+                });
+                if (!r.ok) {
+                    const err = await r.json();
+                    showToast(err.erro || "Erro ao definir o acesso", "error");
+                    loadFuncionarios();
+                    return;
+                }
+                if (desejado.ativo && !atual) {
+                    showToast(`Acesso criado: login ${salvo.email}, senha inicial Trocar@123 (troca obrigatória no 1º acesso).`, "success");
+                }
+            }
+        }
+        fecharModal("modal-admin");
+        showToast(id ? "Funcionário atualizado!" : "Funcionário criado!", "success");
+        loadFuncionarios();
     };
 
     abrirModal("modal-admin");
+}
+
+// Seção "Acesso ao sistema" do cadastro do funcionário (somente admin)
+function secaoAcesso(funcData) {
+    if (currentUser?.perfil !== "admin") return "";
+    const acesso = funcData?.acesso;
+    const ativo = !!(acesso && acesso.ativo);
+    const perfil = acesso?.perfil_cadastrado || "funcionario";
+    const opcao = (valor, rotulo) => `<option value="${valor}" ${perfil === valor ? "selected" : ""}>${rotulo}</option>`;
+    return `
+        <div class="acesso-secao">
+            <label class="acesso-toggle">
+                <input type="checkbox" id="acesso-ativo" ${ativo ? "checked" : ""}>
+                <strong>Pode entrar no sistema</strong>
+            </label>
+            <p class="acesso-ajuda">O login é o e-mail acima. Terceiros que só executam trabalho não precisam de acesso.</p>
+            <div id="acesso-detalhes" style="${ativo ? "" : "display:none;"}">
+                <div class="form-group">
+                    <label>Perfil</label>
+                    <select id="acesso-perfil">
+                        ${opcao("funcionario", "Funcionário")}${opcao("gestor", "Gestor")}${opcao("admin", "Admin")}
+                    </select>
+                    <p class="acesso-ajuda">Quem tem a função Diretor ou Gerente tem acesso de admin, qualquer que seja o perfil.</p>
+                </div>
+                ${acesso
+                    ? `<button type="button" class="btn btn-ghost btn-sm" onclick="resetSenha(${funcData.usuario_id})">Redefinir senha</button>
+                       ${acesso.trocar_senha ? `<span class="acesso-ajuda" style="margin-left:8px;">Ainda não trocou a senha inicial.</span>` : ""}`
+                    : `<p class="acesso-ajuda">Ao salvar, a senha inicial será <strong>Trocar@123</strong>, com troca obrigatória no primeiro acesso.</p>`}
+            </div>
+        </div>
+    `;
 }
 
 async function editFuncionario(id) {
@@ -339,9 +399,10 @@ async function reativarFase(id) {
 async function loadUsuarios() {
     const res = await fetch("/api/usuarios");
     if (!res.ok) return;
-    const data = await res.json();
+    // Contas ligadas a funcionários são gerenciadas na aba Funcionários
+    const data = (await res.json()).filter(u => !u.funcionario_id);
     const tbody = document.querySelector("#table-usuarios tbody");
-    tbody.innerHTML = "";
+    tbody.innerHTML = data.length ? "" : `<tr><td colspan="5" style="color:var(--text-muted);">Nenhuma conta sem funcionário.</td></tr>`;
     data.forEach(u => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
