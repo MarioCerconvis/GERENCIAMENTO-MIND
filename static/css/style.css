@@ -1854,3 +1854,6 @@ input[type="color"] {
     color: var(--text-muted);
     margin: 4px 0 8px;
 }
+
+/* Data de vencimento no card: sem quebrar linha */
+.card-footer .sla-badge { white-space: nowrap; }

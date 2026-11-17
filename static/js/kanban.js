@@ -196,16 +196,16 @@ function createCard(projeto) {
     const sla = projeto.sla || {};
     const slaClass = sla.flag === "Dentro do SLA" ? "sla-dentro" : "sla-fora";
     const slaIcon = sla.flag === "Dentro do SLA" ? "🟢" : "🔴";
-    const slaDias = sla.dias_restantes != null
-        ? (sla.dias_restantes >= 0 ? `${sla.dias_restantes}d restantes` : `${Math.abs(sla.dias_restantes)}d atraso`)
-        : "";
-    
+    // Mostra a data de vencimento; a contagem de dias fica no tooltip
+    const textoPrazo = dias => dias == null ? "" : (dias >= 0 ? `Vence em ${dias} dia(s)` : `${Math.abs(dias)} dia(s) de atraso`);
+    const slaData = projeto.data_limite ? formatDate(projeto.data_limite) : "";
+    const slaTitulo = `Vencimento do módulo. ${textoPrazo(sla.dias_restantes)}`;
+
     let diasFase = sla.dias_na_fase != null ? `⏱️ ${sla.dias_na_fase}d na fase` : "";
     if (projeto.sla_fase) {
         const sf = projeto.sla_fase;
         const sfIcon = sf.flag === "Dentro do SLA" ? "🟢" : "🔴";
-        const sfDias = sf.dias_restantes >= 0 ? `${sf.dias_restantes}d rest.` : `${Math.abs(sf.dias_restantes)}d atraso`;
-        diasFase += ` | ${sfIcon} ${sfDias} (Fase)`;
+        diasFase += ` | <span title="Vencimento da fase. ${textoPrazo(sf.dias_restantes)}">${sfIcon} Fase até ${formatDate(sf.data_limite)}</span>`;
         
         // SLA de Fase Visual
         if (sf.dias_restantes > 2) {
@@ -283,7 +283,7 @@ function createCard(projeto) {
         ${priorityBadge ? `<div class="prio-badges">${priorityBadge}</div>` : ""}
         
         <div class="card-footer">
-            <span class="sla-badge ${slaClass}">${slaIcon} ${slaDias}</span>
+            <span class="sla-badge ${slaClass}" title="${slaTitulo}">${slaIcon} ${slaData}</span>
             <span class="card-days">${diasFase}</span>
         </div>
         ${funcsFase.length > 0
